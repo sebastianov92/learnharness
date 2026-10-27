@@ -7,7 +7,9 @@ import { Agent, type AgentMessage } from "@earendil-works/pi-agent-core";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { piModels } from "../src/agent/models.ts";
 import { toLlmMessages } from "../src/core/native-messages.ts";
+import { installSubscriptionTransport } from "./helpers/subscription-transport.ts";
 import { buildSubagentSteer } from "../src/core/contracts.ts";
+const transport = installSubscriptionTransport((message, callback) => (process.send as unknown as (m: unknown, cb?: (e?: Error) => void) => boolean)(message, callback));
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lh-chatgpt-background-"));
 process.env.LH_DATA_DIR = path.join(dir, "data");
 process.env.LH_AUTH_FILE = path.join(dir, "scratch-auth.json");
@@ -16,7 +18,7 @@ const { stores } = await import("../src/server/stores.ts");
 const { beginTurn, endTurn } = await import("../src/server/turn-liveness.ts");
 const { deliverJobResult, registerLiveAgent, unregisterLiveAgent, setTurnRunner, settleSteers, steerLiveChat } = await import("../src/server/jobs.ts");
 const { persistTurn } = await import("../src/server/turn-service.ts");
-const ipc = (value: unknown) => (process.emit as (name: string, value: unknown) => boolean)("message", value);
+const ipc = (value: unknown) => transport.emit(value);
 let revision = 1;
 function connection(background: boolean) {
 	ipc({ channel: "lh:chatgpt", kind: "state", stamp: { epoch: 1, authorityRevision: 1, revision: revision++ }, invalidate: background ? "none" : "background", status: { available: true, pending: false, allowBackgroundUse: background, activeId: "scratch-account", accounts: [{ id: "scratch-account", connected: true, planEnabled: true, background: !background }], error: null } });
@@ -24,7 +26,6 @@ function connection(background: boolean) {
 const originalSend = Object.getOwnPropertyDescriptor(process, "send"), originalConnected = Object.getOwnPropertyDescriptor(process, "connected");
 const desktopMarker = process.env.LH_DESKTOP_SERVER, desktopSecret = process.env.LH_DESKTOP_API_SECRET;
 before(() => {
-	process.env.LH_DESKTOP_SERVER = "1"; process.env.LH_DESKTOP_API_SECRET = "d".repeat(64);
 	Object.defineProperty(process, "connected", { configurable: true, value: true });
 	Object.defineProperty(process, "send", { configurable: true, value: (_message: unknown, callback?: (error: Error) => void) => { callback?.(new Error("unexpected fixture desktop request")); return false; } });
 });

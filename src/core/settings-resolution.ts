@@ -173,9 +173,7 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		models[role] = resolveModelSpec(role, agent.models?.[role], modelsSection);
 	}
 	return {
-		general: {
-			autoUpdate: record?.general?.autoUpdate ?? FACTORY_SETTINGS.general.autoUpdate,
-		},
+		general: {},
 		agent: {
 			models,
 			tools: agent.tools ?? {},

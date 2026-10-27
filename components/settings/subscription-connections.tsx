@@ -18,7 +18,7 @@ const CONTROL_ERROR = "The connection could not be changed. Try again.";
 
 export function NativeSubscriptionUIProvider({ children }: { children: React.ReactNode }) {
 	const bridge = useNativeSubscriptionBridge();
-	const web = typeof window !== "undefined" && bridge !== window.lh?.subscriptions;
+	const web = typeof window !== "undefined" && bridge !== window.__lhTestBridges?.subscriptions;
 	const [statuses, setStatuses] = useState<NativeSubscriptionStatus[]>([]);
 	const [dialog, setDialog] = useState<NativeSubscriptionProviderId | null>(null);
 	const [view, setView] = useState<"notice" | "connection" | "manage">("notice");
@@ -40,7 +40,7 @@ export function NativeSubscriptionUIProvider({ children }: { children: React.Rea
 				return next && (!old || next.revision >= old.revision) ? next : old ?? emptySubscriptionStatus(providerId);
 			});
 			statusesRef.current = accepted; setStatuses(accepted);
-		} catch { if (mounted.current && request === sequence.current) setError("The desktop connection is unavailable. Retry when the app is ready."); }
+		} catch { if (mounted.current && request === sequence.current) setError("The subscription service is unavailable. Retry in a moment."); }
 	}
 	useEffect(() => {
 		mounted.current = true; void refresh();
@@ -94,7 +94,7 @@ export function NativeSubscriptionUIProvider({ children }: { children: React.Rea
 					<Toggle label="Allow background use" checked={management ? status.allowBackgroundUse : background} disabled={busy || !!operation || status.pending || !status.available} onChange={(enabled) => { setBackground(enabled); if (management && bridge) void control(() => bridge.consent(dialog, enabled)); else setBackgroundDirty(true); }} />
 					<span>Allow background use<span className="mt-1 block leading-relaxed text-muted-foreground">{SUBSCRIPTION_BACKGROUND_HINT}</span></span>
 				</div>
-				{!status.available && <p className="mt-3 text-xs text-muted-foreground">Subscription sign-in requires the desktop app's private server connection. API-key connections remain available here.</p>}
+				{!status.available && <p className="mt-3 text-xs text-muted-foreground">Subscription sign-in is unavailable on this server. API-key connections remain available here.</p>}
 				{view === "connection" && interaction && <div className="mt-3 space-y-3 text-xs" data-testid="subscription-login-interaction">
 					{interaction.progress && <p role="status" className="text-muted-foreground">{interaction.progress}</p>}
 					{interaction.userCode && <p>Device code: <code className="select-text font-mono">{interaction.userCode}</code></p>}

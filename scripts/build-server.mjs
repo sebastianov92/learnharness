@@ -1,14 +1,13 @@
 /**
- * build-server.mjs — curate the Electron shell's server payload.
+ * build-server.mjs — curate the server payload (the Docker image's runtime
+ * stage copies exactly this: .next/standalone).
  *
  * `next build` (output: "standalone") produces .next/standalone/ with
  * server.js + the traced node_modules subset, but leaves two pieces
  * outside that the docs require us to copy: public/ and .next/static/.
  * This script finishes the job and sanity-checks the result — including
- * the exclusion that keeps the repo's real data/ OUT of the bundle
- * (see next.config.ts outputFileTracingExcludes). It also removes two
- * exact build-only paths the tracer sweeps in: old installers and the
- * development Electron runtime. Broad trace exclusions break externals.
+ * the exclusion that keeps the repo's real data/ and dev secrets OUT of
+ * the bundle (see next.config.ts outputFileTracingExcludes).
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -42,7 +41,7 @@ if (exists(path.join(ROOT, "public"))) {
 // 2) Safety: the repo's real data/ must NEVER ride along in the bundle.
 const leakedData = path.join(STANDALONE, "data");
 if (exists(leakedData)) {
-	console.error("[build-server] REFUSING: standalone contains a data/ directory — repo session data would ship in the app.");
+	console.error("[build-server] REFUSING: standalone contains a data/ directory — repo session data would ship in the image.");
 	console.error("             Check outputFileTracingExcludes in next.config.ts.");
 	process.exit(1);
 }
@@ -55,25 +54,9 @@ if (exists(leakedData)) {
 const subscriptionSecrets = fs.readdirSync(STANDALONE).filter((name) => /^(chatgpt|github-copilot|xai)-credentials\.json/.test(name));
 for (const secret of ["auth.json", ...subscriptionSecrets, ".env", ".env.local"]) {
 	if (exists(path.join(STANDALONE, secret))) {
-		console.error(`[build-server] REFUSING: standalone contains ${secret} — dev secrets would ship in the app.`);
+		console.error(`[build-server] REFUSING: standalone contains ${secret} — dev secrets would ship in the image.`);
 		console.error("             Check outputFileTracingExcludes in next.config.ts.");
 		process.exit(1);
-	}
-}
-
-// 2c) Payload curation (2026-10-11): the trace sweep can copy repo-root
-// dist/ (previous installers, recursively) and the development Electron
-// runtime (the demo helper's dev-only require). Neither belongs in the
-// server: packaged helpers use process.execPath, the app's own binary.
-// Remove ONLY these standalone-root paths AFTER tracing — excluding a
-// generic dist/** earlier broke pi-ai / pi-agent-core's runtime dist/.
-// Never touch ROOT/dist or ROOT/node_modules/electron (the running app
-// and the build runtime); native canvas/resvg packages stay untouched.
-for (const extra of ["dist", path.join("node_modules", "electron")]) {
-	const target = path.join(STANDALONE, extra);
-	if (exists(target)) {
-		fs.rmSync(target, { recursive: true, force: true });
-		console.log(`[build-server] removed build-only payload: ${extra}`);
 	}
 }
 

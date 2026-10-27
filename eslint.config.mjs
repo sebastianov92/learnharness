@@ -16,13 +16,13 @@ import importPlugin from "eslint-plugin-import";
  *                    the storage ports, the composition — arrive via
  *                    factories/closures from the chat-handler)
  *
- * tests/ and scripts/ are internal — unrestricted.
+ * tests/ and scripts/ are internal — unrestricted. src/subscriptions/ holds
+ * the plain-Node subscription controllers (.cjs, not linted) that only the
+ * server layer composes.
  */
 
 export default defineConfig([
-	// electron/** — the desktop shell: plain Node, no framework, outside the
-// import law (same rationale as scripts/).
-	globalIgnores([".next/**", "node_modules/**", "data/**", "next-env.d.ts", "scripts/**", "electron/**", "dist/**"]),
+	globalIgnores([".next/**", "node_modules/**", "data/**", "next-env.d.ts", "scripts/**"]),
 	{
 		files: ["**/*.{js,mjs,ts,tsx}"],
 		languageOptions: {

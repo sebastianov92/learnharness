@@ -28,7 +28,7 @@ function Reader({ id }: { id: string }) {
  return <span data-testid={id}>{catalog ? [...catalogLimits(catalog).keys()].join(",") : "unavailable"}</span>;
 }
 async function mount(children: React.ReactNode) { host = document.createElement("div"); document.body.append(host); root = createRoot(host); await act(async () => root!.render(children)); }
-afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); root = undefined; host = undefined; globalThis.fetch = originalFetch; delete window.lh; snapshots = {}; });
+afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); root = undefined; host = undefined; globalThis.fetch = originalFetch; delete window.__lhTestBridges; snapshots = {}; });
 
 test("shared ChatGPT-only readiness admits without API keys; connection invalidation clears every reader and fences old success/error", async () => {
  const requests: ReturnType<typeof deferred<Response>>[] = [];
@@ -65,7 +65,7 @@ test("plan plus unknown graph rows keep the existing unknown suffix without fabr
 test("root-lifetime safe bridge publishes with Connections unmounted; commands/panel pushes do not duplicate global signals", async () => {
  let pushes: (() => void)[] = [], subscriptions = 0, unsubscriptions = 0, fetches = 0;
  const safe: ChatGPTStatus = { available: true, pending: false, allowBackgroundUse: false, activeId: "a", accounts: [{ id: "a", email: "dummy@example.invalid", registration: "oaiapp_dummy", connected: true, planEnabled: true }], error: null };
- window.lh = { expandWindow() {}, chatgpt: { status: async () => safe, login: async () => safe, cancel: async () => safe, select: async () => safe, disconnect: async () => safe, logout: async () => safe, consent: async () => safe, onChange: (cb) => { subscriptions++; pushes.push(cb); return () => { unsubscriptions++; pushes = pushes.filter((c) => c !== cb); }; } } };
+ window.__lhTestBridges = { chatgpt: { status: async () => safe, login: async () => safe, cancel: async () => safe, select: async () => safe, disconnect: async () => safe, logout: async () => safe, consent: async () => safe, onChange: (cb) => { subscriptions++; pushes.push(cb); return () => { unsubscriptions++; pushes = pushes.filter((c) => c !== cb); }; } } };
  globalThis.fetch = async (input) => { assert.equal(input, "/api/models"); fetches++; return Response.json(body(`model-${fetches}`)); };
  await mount(<SidebarProvider><Reader id="root" /></SidebarProvider>);
  assert.equal(subscriptions, 1);

@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 const require = createRequire(import.meta.url);
-const { createChatGPT, fileStore } = require("../electron/chatgpt.cjs");
+const { createChatGPT, fileStore } = require("../src/subscriptions/chatgpt.cjs");
 const initial = () => ({ version: 1, hostId: "urn:uuid:scratch-host", activeId: null, registrations: [] });
 const account = (id: string, subject: string) => ({
 	id, clientId: `oaiapp_${id}`, issuer: "https://auth.openai.com", subject, email: `${subject}@example.invalid`,
@@ -117,9 +117,3 @@ test("file read/write failures are sanitized and cannot leak credential or path 
 	} finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
-test("desktop wiring uses only the private JSON path, with no Electron safeStorage dependency", async () => {
-	const main = await fs.readFile(new URL("../electron/main.cjs", import.meta.url), "utf8");
-	const auth = await fs.readFile(new URL("../electron/chatgpt.cjs", import.meta.url), "utf8");
-	assert.match(main, /store: fileStore\(path\.join\(app\.getPath\("userData"\), "chatgpt-credentials\.json"\)\)/);
-	assert.doesNotMatch(main + auth, /safeStorage|encryptedStore|chatgpt-credentials\.enc\.json/);
-});

@@ -1,0 +1,70 @@
+# LearnHarness on a server — the app + a local Ollama for offline models.
+#
+#   docker compose up -d --build        build the image, start both services
+#   docker compose exec ollama ollama pull qwen3:8b     # pull a model
+#   open http://<server>:3000           first run: Settings → Providers
+#
+# Volumes: `learnharness-data` holds chats, the knowledge graph, settings and
+# the saved keys (/data); `ollama-models` holds the pulled model weights.
+#
+# Remove the `ollama` service (and OLLAMA_HOST) to use only cloud providers,
+# or point OLLAMA_HOST at an Ollama you already run (e.g. on the host:
+# http://host.docker.internal:11434 — add the extra_hosts line below on Linux).
+
+services:
+  learnharness:
+    build: .
+    image: learnharness:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Local models: the bundled Ollama service. Also settable later from
+      # Settings → Providers → Local models when this variable is unset.
+      OLLAMA_HOST: http://ollama:11434
+      # Mirror the Ollama service's context length so the context meter is
+      # honest (LearnHarness cannot read Ollama's own environment).
+      OLLAMA_CONTEXT_LENGTH: "32768"
+      # Optional HTTP Basic gate for an instance reachable beyond localhost.
+      # Set both (or at least the password) and put TLS in front.
+      # LH_ACCESS_USER: learnharness
+      # LH_ACCESS_PASSWORD: change-me
+      # Optional cloud/API keys can also be given here instead of the UI
+      # (environment values win over the UI and show as read-only there):
+      # OPENROUTER_API_KEY: ...
+      # ANTHROPIC_API_KEY: ...
+    volumes:
+      - learnharness-data:/data
+    # Linux hosts: uncomment to reach an Ollama running on the host machine.
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+    depends_on:
+      ollama:
+        condition: service_started
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    environment:
+      # Ollama's default context is 4096 tokens — far too small for a
+      # teaching agent. Keep in sync with the value given to learnharness.
+      OLLAMA_CONTEXT_LENGTH: "32768"
+      # Keep one model loaded between turns (seconds); -1 = forever.
+      OLLAMA_KEEP_ALIVE: "30m"
+    volumes:
+      - ollama-models:/root/.ollama
+    # Expose the API on the host only if you want to use it from elsewhere:
+    # ports:
+    #   - "11434:11434"
+    # NVIDIA GPU (needs the NVIDIA Container Toolkit on the host):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+volumes:
+  learnharness-data:
+  ollama-models:

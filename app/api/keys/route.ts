@@ -16,10 +16,13 @@
  * file, and `shadowedByEnv` explains why a saved key is not the live one
  * (env always wins).
  */
-import { keyStatuses, providerKeyList } from "@/src/server";
+import { keyStatuses, ollamaStatus, providerKeyList } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
+/** `ollama` (server fork, 2026-10-27): the last catalog refresh's outcome
+ *  for the local-models row — host, model count, error. The refresh itself
+ *  runs on GET /api/models (the Keys section fetches it first). */
 export async function GET() {
-	return Response.json({ keys: keyStatuses(), providers: providerKeyList() });
+	return Response.json({ keys: keyStatuses(), providers: providerKeyList(), ollama: ollamaStatus() });
 }

@@ -4,7 +4,7 @@
  * The real onPayload hook throws a unique sentinel BEFORE generateContentStream.
  * All file modules must resolve inside the payload, including nested dependencies.
  *
- * node scripts/smoke-provider-runtime.mjs [--standalone <dir>] [--runtime <Node/Electron>]
+ * node scripts/smoke-provider-runtime.mjs [--standalone <dir>]
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -14,15 +14,15 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { formatProbeError, probeEnv } from "./smoke-demo-runtime.mjs";
+import { formatProbeError, probeEnv } from "./smoke-lib.mjs";
 
-export function verifyProviderRuntime(standalone, runtime = process.execPath) {
+export function verifyProviderRuntime(standalone) {
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-provider-runtime-"));
 	try {
 		fs.writeFileSync(path.join(home, "auth.json"), "{}\n", { mode: 0o600 });
-		const result = spawnSync(runtime, [fileURLToPath(import.meta.url), "--probe", path.resolve(standalone)], {
+		const result = spawnSync(process.execPath, [fileURLToPath(import.meta.url), "--probe", path.resolve(standalone)], {
 			cwd: home,
-			env: { ...probeEnv(process.env, home), ELECTRON_RUN_AS_NODE: "1" },
+			env: probeEnv(process.env, home),
 			encoding: "utf8", timeout: 30_000, maxBuffer: 128 * 1024,
 		});
 		if (result.status !== 0 || result.error) {
@@ -145,7 +145,7 @@ async function main() {
 		assert.ok(args[index + 1] && !args[index + 1].startsWith("--"), `${name} requires a path`);
 		return path.resolve(args[index + 1]);
 	};
-	verifyProviderRuntime(value("--standalone", path.resolve(import.meta.dirname, "../.next/standalone")), value("--runtime", process.execPath));
+	verifyProviderRuntime(value("--standalone", path.resolve(import.meta.dirname, "../.next/standalone")));
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -9,9 +9,9 @@ import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-co
 import { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
 import type { NativeSubscriptionScope } from "../src/core/contracts/subscriptions.ts";
 const require = createRequire(import.meta.url);
-const { createSubscriptions, loadSubscriptionSDK, validEndpoint, publicError } = require("../electron/subscriptions.cjs");
-const { fileStore, validateState } = require("../electron/subscription-store.cjs");
-const { subscriptionControl } = require("../electron/subscription-ipc.cjs");
+const { createSubscriptions, loadSubscriptionSDK, validEndpoint, publicError } = require("../src/subscriptions/subscriptions.cjs");
+const { fileStore, validateState } = require("../src/subscriptions/subscription-store.cjs");
+const { subscriptionControl } = require("../src/subscriptions/subscription-ipc.cjs");
 const ids = ["github-copilot", "xai"] as const;
 const credential = (id: string, expires = Date.now() + 3600000): OAuthCredential => ({ type: "oauth", access: id === "xai" ? "fixture-xai-access" : "tid=fixture;proxy-ep=proxy.individual.githubcopilot.com;", refresh: "fixture-refresh", expires, ...(id === "github-copilot" ? { availableModelIds: [githubCopilotProvider().getModels()[0]!.id] } : {}) });
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { resolve, promise }; }

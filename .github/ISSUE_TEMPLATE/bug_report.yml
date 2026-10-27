@@ -26,7 +26,7 @@ body:
     id: operating_system
     attributes:
       label: Operating system
-      description: For example, Windows, macOS or your Linux distribution. Include the OS version if known.
+      description: The server's OS and runtime — for example, Ubuntu 24.04 with Docker 27, or Node 26 on Debian.
     validations:
       required: true
   - type: textarea
@@ -40,7 +40,7 @@ body:
     id: installation
     attributes:
       label: Installation method (optional)
-      description: For example, desktop installer, AppImage, system package, self-hosted web or source build.
+      description: For example, Docker Compose (which image tag), a plain `next start`, or a source checkout.
     validations:
       required: false
   - type: input

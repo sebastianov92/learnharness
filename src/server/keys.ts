@@ -43,12 +43,16 @@ import {
 	AUTH_KEYS,
 	AUTH_PROVIDER_KEYS,
 	AUTH_PROVIDER_ENV_VARS,
+	OLLAMA_HOST_VAR,
+	OLLAMA_PROVIDER_ID,
 	type AuthKeyInfo,
 	type AuthKeyStatus,
 	genericProviderKeyGuard,
 	isKnownAuthKey,
 	isProviderEnvVar,
+	isSecretAuthKey,
 	maskKey,
+	normalizeOllamaHost,
 	validateKeyShape,
 } from "../core/auth-keys.ts";
 import { authStore } from "../store/auth.ts";
@@ -169,7 +173,9 @@ export function resolveKeyStatuses(
 			id,
 			info: AUTH_KEYS.find((k) => k.id === id) ?? null,
 			present: live !== undefined,
-			masked: live !== undefined ? `${maskKey(live)} (${live.trim().length} chars)` : null,
+			// Secrets leave masked (last 4 + length); a plain configuration
+			// value (OLLAMA_HOST, a URL) leaves as-is — there is nothing to hide.
+			masked: live === undefined ? null : isSecretAuthKey(id) ? `${maskKey(live)} (${live.trim().length} chars)` : live.trim(),
 			source: isRealEnv ? "env" : live !== undefined ? "file" : "none",
 			shadowedByEnv: isRealEnv && fileValue !== undefined && envValue !== fileValue,
 		});
@@ -202,6 +208,8 @@ export function keyValue(id: string): string | undefined {
  * no key at all: nothing to gate, present by definition. */
 export function providerKeyPresent(provider: string): boolean {
 	if (isSubscriptionProvider(provider)) return subscriptionConnected(provider);
+	// Ollama (local/offline): "the key" is the server address.
+	if (provider === OLLAMA_PROVIDER_ID) return keyValue(OLLAMA_HOST_VAR) !== undefined;
 	const info = AUTH_PROVIDER_KEYS.find((p) => p.id === provider);
 	return info ? keyValue(info.envVar) !== undefined : true;
 }
@@ -215,7 +223,9 @@ export function providerKeyPresent(provider: string): boolean {
 export function saveKey(id: string, value: string): { ok: true; status: AuthKeyStatus } | { ok: false; error: string } {
 	const shape = isProviderEnvVar(id) ? genericProviderKeyGuard(id, value) : validateKeyShape(id, value);
 	if (!shape.ok) return { ok: false, error: shape.error };
-	const trimmed = value.trim();
+	// OLLAMA_HOST lands NORMALIZED (scheme added, trailing slash and /v1
+	// stripped) — the shape gate above guarantees it normalizes.
+	const trimmed = id === OLLAMA_HOST_VAR ? (normalizeOllamaHost(value) ?? value.trim()) : value.trim();
 	authStore.setAuthVar(id, trimmed);
 	const record = boot();
 	if (!record.realEnv.has(id)) {

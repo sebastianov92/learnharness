@@ -1,8 +1,8 @@
 # Learning Harness — Architecture
 
-Status: **the canonical architecture spec** — describes the as-built system, verified against the code by a full audit on 2026-09-18 (every file under `src/`, `app/`, `components/`, `electron/`, `scripts/`, the lint config, and the test suite; `lint` and `typecheck` clean on the audited tree). The pre-audit spec is archived at [`archive/architecture-2026-09-08.md`](archive/architecture-2026-09-08.md) — history only. Product reasoning lives in [`docs/vision.md`](vision.md); file-by-file layout lives in the README.
+Status: **the canonical architecture spec** — describes the as-built system, verified against the code by a full audit on 2026-09-18 (every file under `src/`, `app/`, `components/`, `scripts/`, the lint config, and the test suite; the server fork of 2026-10-27 removed `electron/` and added `src/subscriptions/`, `src/agent/ollama.ts`, `proxy.ts`'s access gate and the Docker files; `lint` and `typecheck` clean on the audited tree). The pre-audit spec is archived at [`archive/architecture-2026-09-08.md`](archive/architecture-2026-09-08.md) — history only. Product reasoning lives in [`docs/vision.md`](vision.md); file-by-file layout lives in the README.
 
-**What this is.** A standalone learning app (web + Electron desktop): the learner's knowledge accumulates into one persistent, cross-session knowledge graph, built from tutoring sessions in which a teacher agent authors a formal, visible dependency tree (the plan tree) and verifies understanding with structured questions. The graph is the home page; the session is the classroom; everything else serves those two.
+**What this is.** A standalone learning app (a web app, deployed as a Docker image — the server edition): the learner's knowledge accumulates into one persistent, cross-session knowledge graph, built from tutoring sessions in which a teacher agent authors a formal, visible dependency tree (the plan tree) and verifies understanding with structured questions. The graph is the home page; the session is the classroom; everything else serves those two.
 
 **Design principles, in priority order:**
 
@@ -30,7 +30,7 @@ Hold the architecture along two orthogonal axes:
 | **Library** — world model | `data/graph/*` ledgers | extraction pipeline (sole graph writer), derivation, birth-session clusters |
 | **Practice** — problem sets | `data/practice/*.json` | partitioner→generator→grader pipeline, self-contained sets (§7) |
 | **Stage** — presentation shell | nothing server-side | components/, graph canvas, docks — pure consumer via `/api/*` |
-| **Machine room** — host | process + config | Electron main, standalone Next server, `config.ts`, data-dir seam, BYOK keys |
+| **Machine room** — host | process + config | Docker image, standalone Next server, `config.ts`, data-dir seam (`/data`), BYOK keys + `OLLAMA_HOST`, the access gate (`proxy.ts`) |
 
 **The unifying law** (generates everything else): **imports point inward, writes point to append-only evidence, and everything else is derived.** Dependency flows toward purity; data flows toward evidence; no state is stored where it can be recomputed.
 
@@ -136,7 +136,7 @@ flowchart TB
     COMP -.->|"✗ FORBIDDEN (lint)"| SERVER
 ```
 
-**Two rules are documentation-only by design.** The ESLint plugin's `except` can't express "all but one", so (a) `src/server/stores.ts` is *intended* to be the only server module importing adapters — but the server barrel also re-exports the two portless settings adapters and `observability.ts` imports `chatStore` directly; and (b) the browser-safety of the core barrel is a doc-comment convention (see §2.1). `tests/`, `scripts/`, and `electron/` are deliberately outside the law (lint-excluded); tests import freely across layers, scripts act as extra composition roots.
+**Two rules are documentation-only by design.** The ESLint plugin's `except` can't express "all but one", so (a) `src/server/stores.ts` is *intended* to be the only server module importing adapters — but the server barrel also re-exports the two portless settings adapters and `observability.ts` imports `chatStore` directly; and (b) the browser-safety of the core barrel is a doc-comment convention (see §2.1). `tests/` and `scripts/` are deliberately outside the law (lint-excluded; `src/subscriptions/*.cjs` is plain Node the linter does not parse); tests import freely across layers, scripts act as extra composition roots.
 
 ### 2.1 The core barrel and browser-safety
 
@@ -174,7 +174,7 @@ flowchart LR
         BROWSER["Browser UI — components/: question dock (addToolOutput) · graph canvas · docks"]
         HTTP["HTTP transport — app/api/*: 28 route handlers"]
         NOTES["Notes front door — POST /api/graph/import"]
-        ELEC["Electron main — thin launcher, spawns server, LH_DATA_DIR + BYOK env"]
+        ELEC["Docker container — node server.js, LH_DATA_DIR=/data + BYOK env"]
     end
 
     subgraph HEXCORE["THE CORE — src/core (pure domain)"]
@@ -245,7 +245,7 @@ flowchart TB
     end
 
     subgraph ROOM["MACHINE ROOM — host"]
-        HOST["Electron main → standalone Next server · config.ts · LH_DATA_DIR · BYOK"]
+        HOST["Docker image → standalone Next server · config.ts · LH_DATA_DIR · BYOK · OLLAMA_HOST"]
     end
 
     LEARNER -->|"text · answers [transport adapter]"| UI
@@ -406,36 +406,38 @@ Practice turns the graph into problem sets the learner reasons through out loud.
 
 ```mermaid
 flowchart LR
-    subgraph DESKTOP["Electron app (production)"]
-        MAIN["Electron main (electron/main.cjs)<br/>launcher + credential/security owner<br/>origin-pinned controls · private child IPC"] -->|"spawn: ELECTRON_RUN_AS_NODE,<br/>loopback port, LH_DATA_DIR=userData/data"| NEXT["standalone Next server (child)<br/>ALL app logic: turns · extraction · jobs · graph"]
-        MAIN -->|"loadURL, sandboxed renderer"| REND["Browser renderer (components/)<br/>fetch/WebSocket to own origin only"]
+    subgraph IMAGE["Docker container (production)"]
+        NEXT["standalone Next server (node server.js, user node, under tini)<br/>ALL app logic: turns · extraction · jobs · graph<br/>proxy.ts: optional HTTP Basic gate"]
+        CHROME["Chromium (/usr/bin/chromium, per-job headless launch:<br/>demo verify)"]
+        NEXT --> CHROME
     end
-    subgraph OUTSIDE["outside the process"]
-        OR["OpenRouter (BYOK key from auth.json, env-injected — never argv)"]
-        DG["Deepgram STT (browser-direct WebSocket)"]
-        GCSE["Google CSE / Jina (researcher tools)"]
-        CHROME["system Chrome (headless: demo verify · SVG render)"]
-        DISK["data/ ledgers (via LH_DATA_DIR seam)"]
+    subgraph OUTSIDE["outside the container"]
+        BROWSER["Browser (components/)<br/>fetch/SSE to the server; Deepgram STT direct"]
+        OLLAMA["Ollama (OLLAMA_HOST — the compose sibling service,<br/>or any reachable server): OpenAI-compatible /v1 + /api/tags,/api/show"]
+        CLOUD["Cloud providers (BYOK keys from /data/auth.json or env)"]
+        SEARCH["Tavily / Brave (researcher tools)"]
+        DISK["/data volume: ledgers · chats · settings · auth.json<br/>(via LH_DATA_DIR / LH_AUTH_FILE)"]
     end
-    NEXT --> OR
-    NEXT --> GCSE
-    NEXT --> CHROME
+    BROWSER -->|"fetch /api/* (Basic auth when gated)"| NEXT
+    NEXT --> OLLAMA
+    NEXT --> CLOUD
+    NEXT --> SEARCH
     NEXT --> DISK
-    REND --> DG
-    REND -->|"fetch /api/*"| NEXT
 ```
 
-The Electron main is a launcher + credential/security guard, never a host for teaching or inference logic: single-instance lock, deny-by-default permissions, origin-pinned navigation, sandboxed renderer. All Next.js code runs unchanged in a child process (`output: "standalone"`), relocated by the `LH_DATA_DIR` seam (also the test seam — `data-dir-seam.test.ts` covers it, including a fresh-child-process case). The build hard-fails if repo `data/` would leak into the bundle or if prompt assets fall out of the trace (`scripts/build-server.mjs`).
+The container is a launcher, never a host for teaching or inference logic of its own: one Next.js standalone server (`output: "standalone"`), running as an unprivileged user, relocated by the `LH_DATA_DIR` seam to the `/data` volume (also the test seam — `data-dir-seam.test.ts` covers it, including a fresh-child-process case). The image build hard-fails if repo `data/` or dev secrets would leak into the payload, if prompt assets fall out of the trace (`scripts/build-server.mjs`), if pi-ai's lazy SDKs cannot initialize offline inside the payload (`scripts/smoke-provider-runtime.mjs`), or if the packaged server does not boot and answer its GET routes (`scripts/smoke-server.mjs`). The access gate (`proxy.ts` → `src/server/access-gate.ts`) is the one process-level security control: optional HTTP Basic auth over every page and API call when `LH_ACCESS_PASSWORD` is set; TLS and anything multi-user belong to a reverse proxy in front.
+
+**Ollama** (`src/agent/ollama.ts`) is a dynamic pi-ai provider registered beside the built-in catalogs in `piModels()`: keyless auth that resolves iff `OLLAMA_HOST` is set (the live host rides as `auth.baseUrl`, so a host change applies on the next request), an empty static catalog, and a fetch — `/api/tags` + `/api/show` per model → capabilities (tools / vision / thinking) and context length — that `refreshConnectionCatalog` runs on every `GET /api/models`. The catalog projection federates it exactly like a keyed provider (`catalogProviders()` reports `keyPresent` from `OLLAMA_HOST`), the chat gate's `providerKeyPresent("ollama")` reads the same variable, and every model costs 0. The settings page's status line (host, model count, last error) rides on `GET /api/keys`.
 
 ---
 
 ### 8.1 Subscription connection boundary
 
-`electron/chatgpt.cjs` retains the existing verified-account ChatGPT authentication, storage and revocation behavior. `electron/subscriptions.cjs` delegates GitHub Copilot/Grok login and refresh to the installed Pi SDK through its public provider/Models interfaces. Their single saved connections live independently in owner-only, atomically written `github-copilot-credentials.json` / `xai-credentials.json` beside the existing app credential files. In packaged desktop mode Electron main alone owns durable OAuth credentials and serialized refresh; no global Pi files or API-key credential precedence are involved.
+`src/subscriptions/chatgpt.cjs` retains the existing verified-account ChatGPT authentication, storage and revocation behavior. `src/subscriptions/subscriptions.cjs` delegates GitHub Copilot/Grok login and refresh to the installed Pi SDK through its public provider/Models interfaces. Their single saved connections live independently in owner-only, atomically written `github-copilot-credentials.json` / `xai-credentials.json` beside the app's `auth.json`. The server process alone owns durable OAuth credentials and serialized refresh; no global Pi files or API-key credential precedence are involved.
 
-The packaged desktop renderer gets projected status, public device user codes, prompts and controls over origin-pinned IPC. The privately launched server child receives credential-free catalogs and scoped request auth (including native headers/account endpoints), never refresh tokens. `src/agent/subscription-bridge.ts` rejects framework-only IPC and invalidates stale connection/catalog scopes. `subscription-stream.ts` dispatches directly through native providers, retaining native protocol identity on the wire and restoring logical app identity in assistant history. Persisted routes `chatgpt`, `github-copilot-subscription` and `xai-subscription` are distinct from ordinary API routes and never fall back to them.
+The browser gets projected status, public device user codes, prompts and controls over same-origin HTTP (`src/server/web-subscription-http.ts`). The agent layer receives credential-free catalogs and scoped request auth (including native headers/account endpoints), never refresh tokens, through the injected transport (`src/agent/subscription-runtime.ts`); `src/agent/subscription-bridge.ts` invalidates stale connection/catalog scopes. `subscription-stream.ts` dispatches directly through native providers, retaining native protocol identity on the wire and restoring logical app identity in assistant history. Persisted routes `chatgpt`, `github-copilot-subscription` and `xai-subscription` are distinct from ordinary API routes and never fall back to them.
 
-For ordinary Next web/dev, `src/server/web-subscriptions.ts` composes these same plain-Node controllers into one lazy process-global credential owner beside configured `AUTH_FILE`. The server injects the private transport through `src/agent/subscription-runtime.ts`; the agent layer never imports the server layer. Existing scoped leases, authority revisions and foreground/background abort listeners work through that transport, without exposing an HTTP token/lease operation. `src/server/web-subscription-http.ts` exposes only same-origin status/control operations. Generic `subscriptions-changed` notifications use the existing SSE notify→fetch channel; opaque one-use browser actions redirect to provider pages without putting authorization URLs in app JSON. Browser adapters preserve the UI bridge contracts; Electron dev uses the web owner with a narrow system-browser opener. Desktop markers fail closed rather than falling back to web credentials. This is the existing shared developer-server trust model, not user authentication or DNS-rebinding protection; LAN behavior is unchanged. Only one server process may own an auth directory. See [development](development.md#subscription-connections-in-webdev) for storage, browser locality and access limitations.
+`src/server/web-subscriptions.ts` composes these plain-Node controllers into one lazy process-global credential owner beside the configured `AUTH_FILE`. The server injects the private transport through `src/agent/subscription-runtime.ts`; the agent layer never imports the server layer. Existing scoped leases, authority revisions and foreground/background abort listeners work through that transport, without exposing an HTTP token/lease operation. `src/server/web-subscription-http.ts` exposes only same-origin status/control operations. Generic `subscriptions-changed` notifications use the existing SSE notify→fetch channel; opaque one-use browser actions redirect to provider pages without putting authorization URLs in app JSON. Browser adapters preserve the UI bridge contracts. This is a single-user trusted-server model, not user authentication or DNS-rebinding protection — the access gate and a reverse proxy supply those. Only one server process may own an auth directory. See [development](development.md#subscription-connections-in-webdev) for storage, browser locality and access limitations.
 
 `subscription-request-cycle.ts` is the shared admission/automatic-input recovery state machine; the old ChatGPT module is its compatibility export. Background consent is independent per provider, default ON, with foreground-preserving cancellation and queue ownership retained on no-dispatch. Native usage rejected before dispatch is transiently excluded from helper usage collectors, without adding persisted provenance fields. Catalogs and read-time pricing preserve the selected connection: subscription use displays compact provider labels, API dollars remain dollars, and mixed usage joins both without estimating subscription dollars or claiming detected tiers/allowances.
 
@@ -475,8 +477,8 @@ For ordinary Next web/dev, `src/server/web-subscriptions.ts` composes these same
 ### Known deviations from the ideal (documented, deliberate or accepted)
 
 - Two portless settings adapters re-exported through the server barrel; `observability.ts` imports `chatStore` directly. The "only `stores.ts` imports adapters" rule is documentation-only.
-- `scripts/` and `electron/` are lint-exempt; scripts act as extra composition roots (and backfills are, by design, extra graph writers); `tests/` imports freely across layers.
-- Small conventional-only sync points: `SIDEBAR_AUTOCLOSE` mirrored in `electron/main.cjs` ↔ `components/sidebar.tsx`; IPC channel names mirrored by comment; the jobs dir path hardcoded in the adapter rather than `config.ts`.
+- `scripts/` is lint-exempt; scripts act as extra composition roots (and backfills are, by design, extra graph writers); `tests/` imports freely across layers.
+- Small conventional-only sync points: the subscription channel names (`lh:chatgpt`, `lh:subscriptions`) mirrored by comment between the bridges and the web owner; the jobs dir path hardcoded in the adapter rather than `config.ts`; `OLLAMA_CONTEXT_LENGTH` mirrored between the two compose services.
 
 ---
 
@@ -553,8 +555,10 @@ Every place the architecture is designed to be cut — the "one file" a future c
 | Push events | `src/core/events.ts` (bus) + `src/server/events-stream.ts` (SSE seam) + `components/server-events.tsx` (the window's EventSource) | change notification, end to end |
 | Agent construction (tests) | `handleChatRequest(req, buildAgent?)` | scripted engines, no refactor |
 | Sub-agent verification | `sub-agents/headless.ts` (`headlessOverride`) | demo/SVG verification, no Chrome |
-| Data location (Electron) | `LH_DATA_DIR` env (`config.ts` PATHS) | where data/ lives, nothing else |
-| Desktop host | `electron/main.cjs` | launcher/security shell only |
+| Data location (Docker) | `LH_DATA_DIR` env (`config.ts` PATHS) | where data/ lives, nothing else |
+| Server host | `Dockerfile` / `docker-compose.yml` | image + the app/Ollama stack only |
+| Access gate | `proxy.ts` → `src/server/access-gate.ts` | optional HTTP Basic over every request |
+| Local models | `src/agent/ollama.ts` (`OLLAMA_HOST`) | the dynamic Ollama provider |
 
 ---
 

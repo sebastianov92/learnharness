@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 const require = createRequire(import.meta.url);
-const { createChatGPT, fileStore, allowedAuthEndpoint, SCOPES } = require("../electron/chatgpt.cjs");
+const { createChatGPT, fileStore, allowedAuthEndpoint, SCOPES } = require("../src/subscriptions/chatgpt.cjs");
 const { privateKey, publicKey } = await generateKeyPair("RS256");
 const jwk = { ...await exportJWK(publicKey), kid: "scratch-key", alg: "RS256", use: "sig" };
 const tokenUrl = "https://auth.openai.com/api/accounts/oauth/token";

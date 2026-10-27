@@ -1,5 +1,5 @@
 /** Server-injected private web transport. The agent layer never imports a
- * filesystem owner or server composition root. Desktop IPC remains separate. */
+ * filesystem owner or server composition root. */
 export type SubscriptionRuntimeChannel = "lh:chatgpt" | "lh:subscriptions";
 export type SubscriptionRuntimePacket = Record<string, unknown>;
 interface Runtime {
@@ -12,8 +12,10 @@ function runtime(): Runtime {
 	return global[KEY] ??= { listeners: new Map() };
 }
 export function configureWebSubscriptionRuntime(request: NonNullable<Runtime["request"]>): void { runtime().request = request; }
+/** Test seam: no owner at all (requests reject, pushes are ignored). */
+export function resetWebSubscriptionRuntime(): void { delete runtime().request; }
 export function webSubscriptionsEnabled(): boolean {
-	return process.env.LH_DESKTOP_SERVER !== "1" && !process.env.LH_DESKTOP_API_SECRET && !!runtime().request;
+	return !!runtime().request;
 }
 export function onWebSubscriptionPacket(channel: SubscriptionRuntimeChannel, listener: (packet: SubscriptionRuntimePacket) => void): void {
 	const state = runtime(); const listeners = state.listeners.get(channel) ?? new Set();

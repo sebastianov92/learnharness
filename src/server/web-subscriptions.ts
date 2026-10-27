@@ -1,14 +1,14 @@
-/** Persistent Node web/dev owner. Never imported by client code. Desktop keeps
- * its existing main-process owner; a broken desktop IPC channel cannot fall
- * back to these files. One server process must own each configured auth dir. */
+/** Persistent Node web owner of the subscription connections (ChatGPT,
+ * GitHub Copilot, Grok). Never imported by client code. One server process
+ * must own each configured auth dir. */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { AUTH_FILE } from "../../config.ts";
-import { createChatGPT, fileStore } from "../../electron/chatgpt.cjs";
-import { createSubscriptions } from "../../electron/subscriptions.cjs";
-import { chatGPTControl } from "../../electron/chatgpt-ipc.cjs";
-import { subscriptionControl } from "../../electron/subscription-ipc.cjs";
+import { createChatGPT, fileStore } from "../subscriptions/chatgpt.cjs";
+import { createSubscriptions } from "../subscriptions/subscriptions.cjs";
+import { chatGPTControl } from "../subscriptions/chatgpt-ipc.cjs";
+import { subscriptionControl } from "../subscriptions/subscription-ipc.cjs";
 import { emit } from "../core/events.ts";
 import type { ChatGPTStatus } from "../core/contracts/chatgpt.ts";
 import type { NativeSubscriptionSnapshot } from "../core/contracts/subscriptions.ts";
@@ -94,7 +94,7 @@ export function createWebSubscriptionOwner(options: {
 	};
 }
 export function webSubscriptionOwner() {
-	if (!webSubscriptionsEnabled()) throw new Error("Web subscription controls are unavailable in desktop-owned mode.");
+	if (!webSubscriptionsEnabled()) throw new Error("The subscription owner is not running in this server.");
 	const state = registry();
 	if (!state.owner) {
 		state.owner = createWebSubscriptionOwner({ directory: path.dirname(AUTH_FILE), onPacket: publish });

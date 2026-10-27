@@ -8,7 +8,9 @@ import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-s
 import { piModels } from "../src/agent/models.ts";
 import { toLlmMessages } from "../src/core/native-messages.ts";
 import { buildSubagentSteer } from "../src/core/contracts.ts";
+import { installSubscriptionTransport } from "./helpers/subscription-transport.ts";
 import { NATIVE_SUBSCRIPTIONS } from "../src/core/contracts/subscriptions.ts";
+const transport = installSubscriptionTransport((message, callback) => (process.send as unknown as (m: unknown, cb?: (e?: Error) => void) => boolean)(message, callback));
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "lh-subscription-background-"));
 process.env.LH_DATA_DIR = path.join(directory, "data"); process.env.LH_AUTH_FILE = path.join(directory, "auth.json"); fs.writeFileSync(process.env.LH_AUTH_FILE, "{}");
 const { stores } = await import("../src/server/stores.ts");
@@ -20,13 +22,12 @@ const marker = process.env.LH_DESKTOP_SERVER, secret = process.env.LH_DESKTOP_AP
 let revision = 0;
 function connection(providerId: string, background: boolean) {
 	revision++;
-	(process.emit as (event: string, value: unknown) => boolean)("message", { channel: "lh:subscriptions", op: "changed", snapshot: {
+	transport.emit({ channel: "lh:subscriptions", op: "changed", snapshot: {
 		statuses: NATIVE_SUBSCRIPTIONS.map((p) => ({ providerId: p.providerId, available: true, connected: true, pending: false, allowBackgroundUse: p.providerId === providerId ? background : true, connectionId: `fixture-${p.providerId}`, epoch: 1, authorityRevision: 1, revision })),
 		models: Object.fromEntries(NATIVE_SUBSCRIPTIONS.map((p) => [p.providerId, piModels().getModels(p.providerId)])),
 	} });
 }
 before(() => {
-	process.env.LH_DESKTOP_SERVER = "1"; process.env.LH_DESKTOP_API_SECRET = "d".repeat(64);
 	Object.defineProperty(process, "connected", { configurable: true, value: true });
 	Object.defineProperty(process, "send", { configurable: true, value: (_message: unknown, callback?: (error: Error) => void) => { callback?.(new Error("unexpected fixture request")); return false; } });
 });

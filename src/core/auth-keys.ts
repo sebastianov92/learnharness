@@ -27,6 +27,59 @@ export interface AuthKeyInfo {
 	description: string;
 	/** Where the user gets a key (opens in the real browser via the shell). */
 	docsUrl: string;
+	/** false = a plain configuration value (a URL), never a secret: the
+	 *  status view returns it UNMASKED. Absent = secret (every API key). */
+	secret?: boolean;
+	/** The paste field's placeholder when the value has a known shape. */
+	placeholder?: string;
+}
+
+// ─── Ollama (local / offline models; server fork 2026-10-27) ───────────────
+// Ollama takes NO key: its one configuration value is the server's base
+// URL, carried in OLLAMA_HOST — Ollama's own conventional variable name —
+// through the same store/env seam as every API key. The pi-ai provider id
+// is "ollama" (src/agent/ollama.ts); the catalog federates it exactly when
+// OLLAMA_HOST is present, the way a keyed provider federates on its key.
+
+export const OLLAMA_PROVIDER_ID = "ollama";
+export const OLLAMA_HOST_VAR = "OLLAMA_HOST";
+export const OLLAMA_DEFAULT_HOST = "http://localhost:11434";
+/** Ollama's own context-length variable. When the SAME value is passed to
+ *  LearnHarness (the compose file does), the reported context window caps
+ *  at it — see src/agent/ollama.ts ollamaContextWindow. */
+export const OLLAMA_CONTEXT_HINT_VAR = "OLLAMA_CONTEXT_LENGTH";
+
+/** The last Ollama catalog refresh's outcome — what the Keys page shows
+ *  beside the host (GET /api/keys `ollama`; produced by src/agent/ollama.ts). */
+export interface OllamaStatus {
+	/** OLLAMA_HOST is set (normalized). */
+	configured: boolean;
+	host: string | null;
+	/** Chat models the last refresh listed (0 when unreachable/unconfigured). */
+	models: number;
+	/** The last refresh's failure (null when it succeeded or never ran). */
+	error: string | null;
+	/** Epoch ms of the last refresh attempt; null before the first. */
+	checkedAt: number | null;
+}
+
+/** Normalize a pasted Ollama address to `scheme://host[:port][/path]`
+ *  with no trailing slash and no trailing `/v1` (the provider appends
+ *  it). A bare `host:port` gets http://. null = not an http(s) URL. */
+export function normalizeOllamaHost(raw: string): string | null {
+	let value = raw.trim();
+	if (value === "") return null;
+	if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) value = `http://${value}`;
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		return null;
+	}
+	if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+	if (!url.hostname) return null;
+	const path = url.pathname.replace(/\/+$/, "").replace(/\/v1$/, "");
+	return `${url.protocol}//${url.host}${path}`;
 }
 
 export const AUTH_KEYS: readonly AuthKeyInfo[] = [
@@ -48,12 +101,26 @@ export const AUTH_KEYS: readonly AuthKeyInfo[] = [
 		description: "Web-search engine for the researcher sub-agent — the alternative to Tavily. Setting the key activates it.",
 		docsUrl: "https://brave.com/search/api/",
 	},
+	{
+		id: OLLAMA_HOST_VAR,
+		label: "Ollama",
+		description: "Local models, offline: the address of an Ollama server. Every chat model it lists shows up in the model pickers at $0.",
+		docsUrl: "https://ollama.com/download",
+		secret: false,
+		placeholder: OLLAMA_DEFAULT_HOST,
+	},
 ] as const;
 
 const AUTH_KEY_IDS: ReadonlySet<string> = new Set(AUTH_KEYS.map((k) => k.id));
 
 export function isKnownAuthKey(id: string): boolean {
 	return AUTH_KEY_IDS.has(id);
+}
+
+/** Is this stored value a SECRET (masked on the way out)? Everything is,
+ *  except the curated entries that opt out (OLLAMA_HOST — a URL). */
+export function isSecretAuthKey(id: string): boolean {
+	return AUTH_KEYS.find((k) => k.id === id)?.secret !== false;
 }
 
 /** One model-provider key row for the settings page's dropdown: which
@@ -164,6 +231,11 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 		case "DEEPGRAM_API_KEY":
 			// No public format — the length floor only catches truncated pastes.
 			return nonEmpty(20);
+		case OLLAMA_HOST_VAR:
+			// Not a key: an http(s) base URL (the store keeps the normalized form).
+			return normalizeOllamaHost(value) !== null
+				? { ok: true }
+				: { ok: false, error: `${id} must be the http(s) address of an Ollama server, e.g. ${OLLAMA_DEFAULT_HOST}` };
 		default:
 			return { ok: false, error: `unknown key "${id}" (supported: ${[...AUTH_KEY_IDS].join(", ")})` };
 	}

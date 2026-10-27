@@ -33,6 +33,9 @@ export { effectivePromptSegments, allSegmentPaths, readPromptOverride } from "..
 // Importing this module runs the idempotent boot fill-gap — every consumer
 // keeps its plain process.env reads (that seam is the point).
 export * from "./keys.ts";
+// Ollama (local/offline models, server fork 2026-10-27): the last-refresh
+// status the Keys page shows beside the host (server→agent is lawful).
+export { ollamaStatus, type OllamaStatus } from "../agent/ollama.ts";
 export * from "./search.ts";
 export { authStore } from "../store/auth.ts";
 export * from "./settings-body.ts";

@@ -39,7 +39,7 @@ const nextConfig: NextConfig = {
 	// Real SDK data/ directories still need their explicit includes too.
 	// The recursive-DMG payload (repo dist/ swept into the bundle, shipping
 	// the previous build inside the next) is instead prevented by the
-	// desktop:dist clean step AND targeted post-trace curation in
+	// build:server clean step AND targeted post-trace curation in
 	// scripts/build-server.mjs (2026-10-11): remove standalone-root dist/
 	// and node_modules/electron/ (the demo helper's DEV runtime; packaged
 	// helpers use the app's own binary). Runtime dependencies' dist/ dirs

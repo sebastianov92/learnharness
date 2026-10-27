@@ -28,7 +28,7 @@ function fixture(connected = false) {
 		consent: async (id, enabled) => { calls.consent.push([id, enabled]); push(id, { allowBackgroundUse: enabled }); },
 		onChange: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
 	};
-	window.lh = { expandWindow() {}, subscriptions: bridge };
+	window.__lhTestBridges = { subscriptions: bridge };
 	return { bridge, calls, login, push, get statuses() { return statuses; } };
 }
 async function mount() {
@@ -43,7 +43,7 @@ const toggle = () => dialog().querySelector<HTMLElement>('[role="switch"]')!;
 const footer = () => dialog().querySelector<HTMLElement>('[data-testid="subscription-connection-footer"]')!;
 async function click(element: HTMLElement) { assert(element); await act(async () => element.click()); }
 async function connectionStep(id: string) { await click(button("Connect", row(id))); await click(button("Continue", dialog())); }
-afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); root = undefined; host = undefined; delete window.lh; });
+afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); root = undefined; host = undefined; delete window.__lhTestBridges; });
 
 test("three compact rows render in approved order with no browser-only sign-in or fabricated identities", () => {
 	const html = renderToStaticMarkup(<ChatGPTUIProvider><NativeSubscriptionUIProvider><SubscriptionConnections /></NativeSubscriptionUIProvider></ChatGPTUIProvider>);

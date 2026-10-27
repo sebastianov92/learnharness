@@ -28,6 +28,9 @@ export async function refreshConnectionCatalog(provider?: string): Promise<void>
 	await Promise.all([
 		!provider || provider === "chatgpt" ? refreshChatGPTModels(piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")) : Promise.resolve(),
 		!provider || nativeSubscriptionId(provider) ? refreshSubscriptionModels() : Promise.resolve(),
+		// Ollama (local/offline): the catalog IS the server's current list —
+		// re-fetched per picker open, never cached across a pull/rm.
+		!provider || provider === OLLAMA_PROVIDER_ID ? refreshOllamaModels(piModels()) : Promise.resolve(),
 	]);
 }
 function connectionModel(provider: string, id: string): Model<Api> | undefined {
@@ -47,7 +50,8 @@ import type {
 	SlotPins,
 } from "../core/contracts/models.ts";
 import type { EffectiveModelSpec, EffectiveSlot } from "../core/settings-resolution.ts";
-import { AUTH_PROVIDER_KEYS } from "../core/auth-keys.ts";
+import { AUTH_PROVIDER_KEYS, OLLAMA_HOST_VAR, OLLAMA_PROVIDER_ID } from "../core/auth-keys.ts";
+import { refreshOllamaModels } from "../agent/ollama.ts";
 import { BACKGROUND_MODEL_ROLES, MODEL_SLOTS, type BackgroundModelRole, type ModelSlotName, type ModelsSettings } from "../core/settings.ts";
 
 /** The picker's client-safe model entry (contract: core/contracts/models.ts). */
@@ -140,6 +144,9 @@ export function catalogProviders(): CatalogProvider[] {
 		envVar: p.envVar,
 		keyPresent: keyValue(p.envVar) !== undefined,
 	})).concat([
+		// Ollama federates on its host address exactly as a keyed provider
+		// federates on its key (server fork, 2026-10-27).
+		{ id: OLLAMA_PROVIDER_ID, envVar: OLLAMA_HOST_VAR, keyPresent: keyValue(OLLAMA_HOST_VAR) !== undefined },
 		{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() },
 		...NATIVE_SUBSCRIPTIONS.map((p) => ({ id: p.logicalId, envVar: "", keyPresent: nativeSubscriptionConnected(p.providerId) })),
 	]).sort((a, b) => a.id.localeCompare(b.id));

@@ -15,13 +15,10 @@ interface BridgeState {
 const key = Symbol.for("lh.chatgpt.bridge");
 const unavailable = (): ChatGPTStatus => ({ available: false, pending: false, allowBackgroundUse: true, activeId: null, accounts: [], error: null });
 const validStamp = (s: Stamp) => s && [s.epoch, s.authorityRevision, s.revision].every((v) => Number.isSafeInteger(v) && v >= 0);
-/** Next dev also uses parent/child IPC. IPC alone is not our desktop
- * transport: require the same launch markers set by Electron startServer.
- * These identify the transport, not a substitute for admission/lease checks. */
-function desktopIPCConnected(): boolean {
- return process.env.LH_DESKTOP_SERVER === "1" && (process.env.LH_DESKTOP_API_SECRET?.length ?? 0) >= 64 && typeof process.send === "function" && process.connected === true;
-}
-function runtimeConnected(): boolean { return desktopIPCConnected() || webSubscriptionsEnabled(); }
+/** The one transport (server fork, 2026-10-27): the in-process web owner
+ * (src/server/web-subscriptions.ts). The desktop IPC transport left with
+ * the Electron shell. */
+function runtimeConnected(): boolean { return webSubscriptionsEnabled(); }
 function bridge(): BridgeState {
  const global = globalThis as typeof globalThis & { [key]?: BridgeState };
  if (!global[key]) {
@@ -46,16 +43,7 @@ function bridge(): BridgeState {
     else call.reject(new Error(m.error ?? "ChatGPT connection failed."));
    }
   };
-  process.on("message", (raw: unknown) => { if (desktopIPCConnected()) receive(raw); });
   onWebSubscriptionPacket("lh:chatgpt", (packet) => { if (webSubscriptionsEnabled()) receive(packet); });
-  process.on("disconnect", () => {
-   if (webSubscriptionsEnabled()) return;
-   state.status = unavailable(); clearCatalog(state); state.catalogRequest++;
-   for (const controller of state.controllers.keys()) controller.abort("all");
-   for (const call of state.pending.values()) { clearTimeout(call.timer); call.reject(new Error("The desktop connection closed.")); }
-   state.pending.clear();
-   for (const listener of state.listeners) listener();
-  });
  }
  return global[key];
 }
@@ -65,19 +53,11 @@ function acceptStatus(state: BridgeState, value: StatusValue) {
  if (value.epoch !== state.stamp.epoch || value.authorityRevision !== state.stamp.authorityRevision || value.status.activeId !== state.status.activeId) clearCatalog(state);
  state.status = value.status; state.stamp = { epoch: value.epoch, authorityRevision: value.authorityRevision, revision: value.revision };
 }
-/** Runtime-only: inherited desktop IPC or direct web owner. Never HTTP leases. */
+/** Runtime-only: the direct web owner. Never HTTP leases. */
 export function chatGPTRequest<T>(op: "status" | "models" | "lease", fields: Record<string, unknown> = {}): Promise<T> {
- const state = bridge();
- if (webSubscriptionsEnabled()) return webSubscriptionRequest<T>("lh:chatgpt", op, fields);
- if (!desktopIPCConnected()) return Promise.reject(new Error("ChatGPT sign-in is available only in the desktop app with a private server connection."));
- return new Promise<T>((resolve, reject) => {
-  const id = `${process.pid}:${++state.counter}`;
-  const timer = setTimeout(() => { state.pending.delete(id); reject(new Error("The ChatGPT desktop connection timed out.")); }, 45000);
-  state.pending.set(id, { op, resolve: (v) => resolve(v as T), reject, timer });
-  process.send!({ ...fields, channel: "lh:chatgpt", id, op }, (error) => {
-   if (error) { clearTimeout(timer); state.pending.delete(id); reject(new Error("The ChatGPT desktop connection closed.")); }
-  });
- });
+ bridge();
+ if (!webSubscriptionsEnabled()) return Promise.reject(new Error("ChatGPT sign-in is unavailable: the server's subscription owner is not running."));
+ return webSubscriptionRequest<T>("lh:chatgpt", op, fields);
 }
 export function chatGPTStatus(): ChatGPTStatus { return bridge().status; }
 export function chatGPTConnected(): boolean { const s = chatGPTStatus(); return runtimeConnected() && s.available && s.accounts.some((a) => a.id === s.activeId && a.connected && a.planEnabled === true); }

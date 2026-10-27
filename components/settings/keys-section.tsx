@@ -24,7 +24,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { AUTH_KEYS, type AuthKeyStatus } from "@/src/core";
+import { AUTH_KEYS, OLLAMA_HOST_VAR, type AuthKeyStatus, type OllamaStatus } from "@/src/core";
 import { SettingsGroup } from "./controls.tsx";
 import { SubscriptionConnections } from "./subscription-connections.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
@@ -42,6 +42,8 @@ export interface ProviderKeyInfo {
 interface KeysResponse {
 	keys: AuthKeyStatus[];
 	providers?: ProviderKeyInfo[];
+	/** The local-models (Ollama) refresh outcome (server fork, 2026-10-27). */
+	ollama?: OllamaStatus;
 }
 
 /** The curated tools group, pinned by id (the catalog owns the copy;
@@ -49,6 +51,24 @@ interface KeysResponse {
  *  2026-09-20: the Google CSE pair retired, Tavily + Brave joined) — the
  *  section can never drift from core/auth-keys.ts again. */
 const TOOL_IDS = AUTH_KEYS.map((k) => k.id) as readonly string[];
+
+/** The curated rows' groups, in render order (server fork, 2026-10-27:
+ *  Local models joined the two tool groups). Every curated id lands in
+ *  exactly one group — the Search group takes whatever the others don't. */
+const TOOL_GROUPS: readonly { label: string; testid: string; ids: readonly string[] }[] = [
+	{ label: "Local models", testid: "group-local-models", ids: [OLLAMA_HOST_VAR] },
+	{ label: "Dictation", testid: "group-dictation", ids: ["DEEPGRAM_API_KEY"] },
+	{ label: "Search", testid: "group-search", ids: TOOL_IDS.filter((id) => id !== OLLAMA_HOST_VAR && id !== "DEEPGRAM_API_KEY") },
+];
+
+/** The Ollama row's second line (pure — exported for tests): what the
+ *  last catalog refresh found at the configured host. */
+export function ollamaStatusLine(status: OllamaStatus | undefined): string | null {
+	if (!status?.configured) return null;
+	if (status.checkedAt === null) return "not checked yet";
+	if (status.error) return `unreachable — ${status.error}`;
+	return status.models === 1 ? "1 model" : `${status.models} models`;
+}
 
 /** The classification driving the table groups. Pure — exported for
  *  tests. OpenRouter is un-pinned (wave-5 owner ruling): no synthesis,
@@ -100,6 +120,9 @@ export function classifyKeys(
  *  environment-owned value — the row itself is read-only then). Pure. */
 export function keyStatusLine(status: AuthKeyStatus): string {
 	if (!status.present || !status.masked) return "not set";
+	// A plain configuration value (OLLAMA_HOST, a URL) arrives unmasked and
+	// reads as-is — only the env marker joins it.
+	if (status.info?.secret === false) return `${status.masked}${status.source === "env" ? " · env" : ""}`;
 	const tail = status.masked.replace(/ \((\d+) chars\)$/, "");
 	const chars = status.masked.match(/\((\d+) chars\)$/)?.[1] ?? "?";
 	return `${tail} · ${chars}${status.source === "env" ? " · env" : ""}`;
@@ -163,7 +186,7 @@ function KeyTableRow({
 						onKeyDown={(e) => {
 							if (e.key === "Enter") void save();
 						}}
-						placeholder="Paste key…"
+						placeholder={status.info?.placeholder ?? "Paste key…"}
 						aria-label={`${label} key`}
 						data-testid={`${testid}-input`}
 						disabled={busy}
@@ -326,6 +349,7 @@ export function KeysSection({
 }) {
 	const [statuses, setStatuses] = useState<AuthKeyStatus[] | null>(null);
 	const [providers, setProviders] = useState<ProviderKeyInfo[] | undefined>(undefined);
+	const [ollama, setOllama] = useState<OllamaStatus | undefined>(undefined);
 	const [loading, setLoading] = useState(true);
 	/** The unfolded row (its id), null = all folded. Seeded by the
 	 *  deep-link (initialRow) and re-followed when it retargets. */
@@ -351,12 +375,18 @@ export function KeysSection({
 		return () => document.removeEventListener("keydown", onKeyDown, true);
 	}, [openRow, adding]);
 
+	// GET /api/models FIRST (server fork, 2026-10-27): that route refreshes
+	// the Ollama catalog, so the keys payload's `ollama` status is fresh.
+	// Its failure never blocks the keys read.
 	const reload = () =>
-		fetch("/api/keys")
+		fetch("/api/models")
+			.catch(() => undefined)
+			.then(() => fetch("/api/keys"))
 			.then((r) => r.json())
 			.then((body: KeysResponse) => {
 				setStatuses(body.keys ?? []);
 				if (body.providers) setProviders(body.providers);
+				setOllama(body.ollama);
 			})
 			.catch(() => setStatuses([]))
 			.finally(() => setLoading(false));
@@ -455,33 +485,50 @@ export function KeysSection({
 				</div>}
 			</SettingsGroup>
 
+			{/* Local models (Ollama) sits right under the API keys — it is a
+			    model source like them; the tool groups follow Subscriptions. */}
+			{toolGroup(TOOL_GROUPS[0]!)}
+
 			<SettingsGroup label="Subscriptions" testid="group-subscriptions">
 				<SubscriptionConnections />
 			</SettingsGroup>
 
-			{(["Dictation", "Search"] as const).map((label) => <SettingsGroup key={label} label={label} testid={label === "Dictation" ? "group-dictation" : "group-search"}>
-				{toolRows.filter((status) => label === "Dictation" ? status.id === "DEEPGRAM_API_KEY" : status.id !== "DEEPGRAM_API_KEY").map((status) => (
-					<KeyTableRow
-						key={status.id}
-						label={status.info?.label ?? status.id}
-						docsUrl={status.info?.docsUrl}
-						status={status}
-						expanded={openRow === status.id}
-						onToggle={() => setOpenRow(openRow === status.id ? null : status.id)}
-						onSave={async (v) => {
-							const err = await saveKey(status.id, v);
-							if (!err) setOpenRow(null);
-							return err;
-						}}
-						onCancel={() => setOpenRow(null)}
-						onDelete={() => deleteKey(status.id)}
-						testid={`key-${status.id.toLowerCase()}`}
-					/>
-				))}
-			</SettingsGroup>)}
+			{TOOL_GROUPS.slice(1).map(toolGroup)}
 
 		</>
 	);
+
+	/** One curated group's table (the Keys row machinery over its ids). */
+	function toolGroup(group: (typeof TOOL_GROUPS)[number]) {
+		return (
+			<SettingsGroup key={group.label} label={group.label} testid={group.testid}>
+				{toolRows.filter((status) => group.ids.includes(status.id)).map((status) => (
+					<div key={status.id}>
+						<KeyTableRow
+							label={status.info?.label ?? status.id}
+							docsUrl={status.info?.docsUrl}
+							status={status}
+							expanded={openRow === status.id}
+							onToggle={() => setOpenRow(openRow === status.id ? null : status.id)}
+							onSave={async (v) => {
+								const err = await saveKey(status.id, v);
+								if (!err) setOpenRow(null);
+								return err;
+							}}
+							onCancel={() => setOpenRow(null)}
+							onDelete={() => deleteKey(status.id)}
+							testid={`key-${status.id.toLowerCase()}`}
+						/>
+						{status.id === OLLAMA_HOST_VAR && (
+							<p className="px-1 pb-1 text-[11px] text-muted-foreground/70" data-testid="ollama-status">
+								{ollamaStatusLine(ollama) ?? "Local models, offline — point this at an Ollama server; every chat model it serves joins the pickers at $0."}
+							</p>
+						)}
+					</div>
+				))}
+			</SettingsGroup>
+		);
+	}
 }
 
 /** The paste field for a provider chosen in the Add dropdown — rendered

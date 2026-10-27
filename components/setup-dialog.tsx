@@ -36,7 +36,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
 import type React from "react";
-import { type ModelCatalogEntry, type ModelSlotName, type ModelsSettings } from "@/src/core";
+import { OLLAMA_DEFAULT_HOST, OLLAMA_HOST_VAR, type ModelCatalogEntry, type ModelSlotName, type ModelsSettings } from "@/src/core";
 import { prettyModel } from "@/components/usage-format";
 import { ModelMenuList } from "@/components/settings/model-menu";
 import { MenuShell } from "@/components/menu-shell";
@@ -129,7 +129,17 @@ export function SetupKeysBody({
 	onValue,
 	onSave,
 	menuAnchor,
+	ollama,
 }: {
+	/** The local-models path (server fork, 2026-10-27): an Ollama host
+	 *  field beside the key picker. Optional — SSR pins render without it. */
+	ollama?: {
+		value: string;
+		saving: boolean;
+		error: string | null;
+		onValue: (v: string) => void;
+		onSave: () => void;
+	};
 	/** The full provider roster (GET /api/keys providers) — undefined
 	 *  while it loads; the picker renders an honest empty state then. */
 	providers: ProviderKeyInfo[] | undefined;
@@ -212,6 +222,43 @@ export function SetupKeysBody({
 					</p>
 				)}
 			</div>
+			{ollama && (
+				<div className="mt-2 border-t border-border/60 pt-4" data-testid="setup-ollama">
+					<h3 className="mb-1 font-ui text-xs text-muted-foreground">Local models (Ollama)</h3>
+					<p className="mb-2 text-xs text-muted-foreground/80">
+						Or run offline: enter the address of an Ollama server. Every chat model it serves appears in the pickers next.
+					</p>
+					<div className="flex max-w-96 items-center gap-2">
+						<input
+							type="text"
+							value={ollama.value}
+							onChange={(e) => ollama.onValue(e.target.value)}
+							onKeyDown={(e) => {
+								if (e.key === "Enter" && ollama.value.trim()) ollama.onSave();
+							}}
+							placeholder={OLLAMA_DEFAULT_HOST}
+							aria-label="Ollama host"
+							data-testid="setup-ollama-input"
+							disabled={ollama.saving}
+							className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
+						/>
+						<button
+							type="button"
+							onClick={ollama.onSave}
+							disabled={ollama.saving || !ollama.value.trim()}
+							data-testid="setup-ollama-save"
+							className="shrink-0 rounded-sm border border-border bg-background px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 disabled:cursor-not-allowed disabled:opacity-40"
+						>
+							{ollama.saving ? "Saving…" : "Use Ollama"}
+						</button>
+					</div>
+					{ollama.error && (
+						<p role="alert" data-testid="setup-ollama-error" className="mt-1 text-xs text-red-400">
+							{ollama.error}
+						</p>
+					)}
+				</div>
+			)}
 			<div className="mt-2 border-t border-border/60 pt-4"><h3 className="mb-3 font-ui text-xs text-muted-foreground">Subscriptions</h3><SubscriptionConnections setup /></div>
 		</div>
 	);
@@ -248,6 +295,11 @@ export function SetupDialog({
 	const [keySaving, setKeySaving] = useState(false);
 	const [keyError, setKeyError] = useState<string | null>(null);
 	const [keyMenuOpen, setKeyMenuOpen] = useState(false);
+	// Stage 1's local-models path (server fork, 2026-10-27): the Ollama
+	// host field — saved through the SAME keys route as a provider key.
+	const [ollamaValue, setOllamaValue] = useState(OLLAMA_DEFAULT_HOST);
+	const [ollamaSaving, setOllamaSaving] = useState(false);
+	const [ollamaError, setOllamaError] = useState<string | null>(null);
 	// Stage 1's provider-picker trigger wrapper — the shared shell's anchor.
 	// Declared with the other hooks: the early `if (!open) return null` sits
 	// below them all. (Stage 2's slot menus anchor by anchorTestid instead —
@@ -372,6 +424,26 @@ export function SetupDialog({
 		notifySettingsSaved("keys");
 	}
 
+	/** Stage 1's Ollama save: PUT the host (shape-gated server-side), then
+	 *  the keys signal widens the catalog with whatever the server lists. */
+	async function saveOllama() {
+		if (!ollamaValue.trim() || ollamaSaving) return;
+		setOllamaSaving(true);
+		setOllamaError(null);
+		const res = await fetch(`/api/keys/${OLLAMA_HOST_VAR}`, {
+			method: "PUT",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ value: ollamaValue }),
+		}).catch(() => null);
+		setOllamaSaving(false);
+		if (!res || !res.ok) {
+			const body = (await res?.json().catch(() => ({}))) as { error?: string } | undefined;
+			setOllamaError(res ? (body?.error ?? `Save failed (${res.status})`) : "Save failed. Check your connection and try again.");
+			return;
+		}
+		notifySettingsSaved("keys");
+	}
+
 	async function save() {
 		if (!allPicked || saving) return;
 		setSaving(true);
@@ -450,6 +522,13 @@ export function SetupDialog({
 								}}
 								onValue={setKeyValue}
 								onSave={() => void saveKey()}
+								ollama={{
+									value: ollamaValue,
+									saving: ollamaSaving,
+									error: ollamaError,
+									onValue: setOllamaValue,
+									onSave: () => void saveOllama(),
+								}}
 							/>
 						)}
 					</div>

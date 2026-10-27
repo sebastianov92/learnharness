@@ -14,7 +14,7 @@ import { createServer } from "node:net";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const require = createRequire(import.meta.url);
-const { SCOPES } = require("../electron/chatgpt.cjs");
+const { SCOPES } = require("../src/subscriptions/chatgpt.cjs");
 const sdk = (file) => import(pathToFileURL(path.join(ROOT, "node_modules/@earendil-works/pi-ai/dist", file)));
 const { createModels } = await sdk("index.js");
 const { builtinProviders } = await sdk("providers/all.js");

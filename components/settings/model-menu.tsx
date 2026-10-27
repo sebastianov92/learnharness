@@ -21,12 +21,18 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ModelCatalogEntry } from "@/src/core";
-import { fuzzyScore, subscriptionLabel } from "@/src/core";
+import { OLLAMA_PROVIDER_ID, fuzzyScore, subscriptionLabel } from "@/src/core";
 import { formatTokens } from "@/components/usage-format";
 
 function priceLabel(cost: ModelCatalogEntry["cost"]): string {
 	const fmt = (n: number) => `$${n < 1 ? n.toFixed(2).replace(/0$/, "") : n.toFixed(2)}`;
 	return `${fmt(cost.input)}/${fmt(cost.output)}`;
+}
+
+/** The price cell: a local Ollama model costs nothing and says so
+ *  (server fork, 2026-10-27) — a $0.00/$0.00 would read like a free tier. */
+function priceCell(m: ModelCatalogEntry): string {
+	return m.provider === OLLAMA_PROVIDER_ID ? "local" : priceLabel(m.cost);
 }
 
 /** The model dropdown body — fuzzy search + ranked list. `models ===
@@ -125,8 +131,8 @@ export function ModelMenuList({
 						>
 							<span className="flex items-center justify-between gap-2">
 								<span className="truncate text-card-foreground">{m.name}</span>
-								<span className="shrink-0 tabular-nums text-muted-foreground" title={subscriptionLabel(`${m.provider}:${m.id}`) ? "Subscription connection" : "USD per 1M tokens in/out"}>
-									{subscriptionLabel(`${m.provider}:${m.id}`) ?? priceLabel(m.cost)}
+								<span className="shrink-0 tabular-nums text-muted-foreground" title={subscriptionLabel(`${m.provider}:${m.id}`) ? "Subscription connection" : m.provider === OLLAMA_PROVIDER_ID ? "Local model (Ollama) — no usage cost" : "USD per 1M tokens in/out"}>
+									{subscriptionLabel(`${m.provider}:${m.id}`) ?? priceCell(m)}
 								</span>
 							</span>
 							<span className="flex items-center justify-between gap-2 text-muted-foreground">

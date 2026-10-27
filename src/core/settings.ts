@@ -28,7 +28,7 @@
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
+import { AUTH_PROVIDER_KEYS, OLLAMA_PROVIDER_ID } from "./auth-keys.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import type { SearchEngineId } from "./search.ts";
@@ -156,7 +156,7 @@ export interface ProviderKeyMissing {
  * (the label prefix varies by provider). */
 const PROVIDER_KEY_MISSING_TAIL = "key is set — add one in Settings → Keys";
 export function providerKeyMissing(provider: string, slots: ModelSlotName[]): ProviderKeyMissing {
-	const label = AUTH_PROVIDER_KEYS.find((p) => p.id === provider)?.label ?? provider;
+	const label = provider === OLLAMA_PROVIDER_ID ? "Ollama host" : (AUTH_PROVIDER_KEYS.find((p) => p.id === provider)?.label ?? provider);
 	return {
 		error: `No ${label} ${PROVIDER_KEY_MISSING_TAIL}`,
 		code: PROVIDER_KEY_MISSING_CODE,
@@ -228,12 +228,11 @@ export const ROLE_SLOT: Readonly<Record<ModelRole, ModelSlotName>> = {
 	pdfReader: "vision",
 };
 
-/** General settings — app-level behavior. Version DISPLAY and plans login
- *  live outside the record (package.json / auth.json) by owner decision. */
-export interface GeneralSettings {
-	/** Automatic startup/24h update checks (default ON). Manual checks bypass this. */
-	autoUpdate?: boolean;
-}
+/** General settings — RESERVED (server fork, 2026-10-27): the one knob it
+ *  held, autoUpdate, left with the desktop app (a server updates by
+ *  redeploying the image). Version DISPLAY lives outside the record
+ *  (package.json) by owner decision. */
+export interface GeneralSettings {}
 
 /** Agent settings — everything about the non-conversation machinery. */
 export interface AgentSettings {
@@ -396,7 +395,7 @@ export interface FactorySettings {
 
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
-	general: { autoUpdate: true },
+	general: {},
 	appearance: {
 		mode: "dark",
 		background: null, // the dark default (#141414) lives in the mode's derivation curve
@@ -437,11 +436,9 @@ function sanitizeHexOrNull(value: unknown): string | null {
 const boolOrDrop = (value: unknown): boolean | undefined =>
 	typeof value === "boolean" ? value : undefined;
 
-function sanitizeGeneral(raw: Record<string, unknown>): GeneralSettings {
-	const out: GeneralSettings = {};
-	const autoUpdate = boolOrDrop(raw.autoUpdate);
-	if (autoUpdate !== undefined) out.autoUpdate = autoUpdate;
-	return out;
+function sanitizeGeneral(_raw: Record<string, unknown>): GeneralSettings {
+	// No general knobs remain: every key inside the section drops.
+	return {};
 }
 
 const THINKING_LEVELS: readonly ThinkingLevel[] = [

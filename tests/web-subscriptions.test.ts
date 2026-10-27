@@ -11,10 +11,9 @@ import { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
 const directory = await fs.mkdtemp(path.join(os.tmpdir(), "lh-web-sub-"));
 process.env.LH_AUTH_FILE = path.join(directory, "auth.json");
 process.env.LH_DATA_DIR = path.join(directory, "data");
-delete process.env.LH_DESKTOP_SERVER; delete process.env.LH_DESKTOP_API_SECRET;
 await fs.writeFile(process.env.LH_AUTH_FILE, "{}", { mode: 0o600 });
 const require = createRequire(import.meta.url);
-const { SCOPES } = require("../electron/chatgpt.cjs");
+const { SCOPES } = require("../src/subscriptions/chatgpt.cjs");
 const { createWebSubscriptionOwner, webSubscriptionOwner, webSubscriptionsEnabled } = await import("../src/server/web-subscriptions.ts");
 const { subscriptionControlsResponse, subscriptionBrowserResponse } = await import("../src/server/web-subscription-http.ts");
 const chat = await import("../src/agent/chatgpt-bridge.ts");
@@ -66,7 +65,7 @@ test("web background OFF immediately aborts background streams, retains foregrou
 	} finally { foreground.release(); background.release(); nativeForeground.release(); nativeBackground.release(); }
 });
 
-test("HTTP controls reject cross-origin, simple-form and private credential operations; desktop never falls back", async () => {
+test("HTTP controls reject cross-origin, simple-form and private credential operations; no owner means no fallback", async () => {
 	const forged = request({ providerId: "chatgpt", op: "consent", enabled: true }); forged.headers.set("origin", "https://unrelated.invalid");
 	assert.equal((await subscriptionControlsResponse(forged)).status, 403);
 	const noHeader = request(); noHeader.headers.delete("x-learnharness-subscriptions");
@@ -78,14 +77,15 @@ test("HTTP controls reject cross-origin, simple-form and private credential oper
 	assert.equal((await subscriptionControlsResponse(huge)).status, 413);
 	const browser = new Request("http://localhost:3000/api/subscriptions/browser?id=00000000-0000-4000-8000-000000000001");
 	assert.equal((await subscriptionBrowserResponse(browser)).status, 403);
-	for (const [marker, secret] of [["1", undefined], [undefined, "fixture-capability"]]) {
-		if (marker) process.env.LH_DESKTOP_SERVER = marker; else delete process.env.LH_DESKTOP_SERVER;
-		if (secret) process.env.LH_DESKTOP_API_SECRET = secret; else delete process.env.LH_DESKTOP_API_SECRET;
+	// No owner at all (the server fork's only transport): controls 404, requests reject.
+	const runtime = await import("../src/agent/subscription-runtime.ts");
+	const { webSubscriptionRequest } = await import("../src/server/web-subscriptions.ts");
+	runtime.resetWebSubscriptionRuntime();
+	try {
 		assert(!webSubscriptionsEnabled());
 		assert.equal((await subscriptionControlsResponse(request())).status, 404);
-		await assert.rejects(chat.chatGPTRequest("status"), /desktop app/);
-	}
-	delete process.env.LH_DESKTOP_SERVER; delete process.env.LH_DESKTOP_API_SECRET;
+		await assert.rejects(chat.chatGPTRequest("status"), /not running/);
+	} finally { runtime.configureWebSubscriptionRuntime(webSubscriptionRequest); }
 });
 
 function fakeSDK(login: (id: string, interaction: ProviderAuthInteraction) => Promise<OAuthCredential>) {

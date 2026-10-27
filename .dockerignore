@@ -1,0 +1,21 @@
+# Build context hygiene: nothing mutable, nothing secret, nothing generated.
+node_modules
+.next
+dist
+data
+.fresh-data
+auth.json
+.env
+.env.local
+chatgpt-credentials.json*
+github-copilot-credentials.json*
+xai-credentials.json*
+*.log
+*.tsbuildinfo
+.DS_Store
+.git
+.github
+.memory
+docs/assets
+tests/fixtures/golden-data
+real-data-extraction

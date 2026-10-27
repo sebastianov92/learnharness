@@ -1,4 +1,6 @@
-/** Run the real payload-curation script in throwaway repository fixtures. */
+/** Run the real payload-curation script (scripts/build-server.mjs) in
+ *  throwaway repository fixtures: the Docker image's runtime stage copies
+ *  exactly what this script blesses. */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
@@ -36,28 +38,18 @@ function withPayload(test: (fixture: {
 	}
 }
 
-describe("desktop standalone payload", () => {
-	it("removes only traced installers/dev Electron, preserving runtime dist/ and native binaries", () => {
+describe("server standalone payload", () => {
+	it("copies static + public in and leaves the runtime tree (externals, natives) untouched", () => {
 		withPayload(({ root, write, run }) => {
-			for (const extra of [path.join("dist", "old.app", "nested.dmg"), path.join("node_modules", "electron", "dist", "electron.exe")]) {
-				// BOTH copies exist: curation must not touch the real repo's build/runtime.
-				write(extra);
-				write(path.join(STANDALONE, extra));
-			}
 			const runtime = [
 				"node_modules/@earendil-works/pi-ai/dist/index.js",
 				"node_modules/@earendil-works/pi-agent-core/dist/index.js",
-				"node_modules/@napi-rs/canvas-darwin-arm64/skia.darwin-arm64.node",
-				"node_modules/@resvg/resvg-js-win32-x64-msvc/resvgjs.win32-x64-msvc.node",
-				"node_modules/electron-updater/out/main.js",
+				"node_modules/@napi-rs/canvas-linux-arm64-gnu/skia.linux-arm64-gnu.node",
+				"node_modules/@resvg/resvg-js-linux-x64-gnu/resvgjs.linux-x64-gnu.node",
 			];
 			for (const file of runtime) write(path.join(STANDALONE, file));
 			const result = run();
 			assert.equal(result.status, 0, String(result.stderr));
-			assert.equal(fs.existsSync(path.join(root, STANDALONE, "dist")), false);
-			assert.equal(fs.existsSync(path.join(root, STANDALONE, "node_modules", "electron")), false);
-			assert.ok(fs.existsSync(path.join(root, "dist", "old.app", "nested.dmg")));
-			assert.ok(fs.existsSync(path.join(root, "node_modules", "electron", "dist", "electron.exe")));
 			for (const file of runtime) assert.ok(fs.existsSync(path.join(root, STANDALONE, file)), file);
 			assert.ok(fs.existsSync(path.join(root, STANDALONE, ".next", "static", "runtime.js")));
 			assert.ok(fs.existsSync(path.join(root, STANDALONE, "public", "asset.txt")));
@@ -74,7 +66,7 @@ describe("desktop standalone payload", () => {
 		});
 	});
 
-	it("still refuses leaked developer data or keys", () => {
+	it("refuses leaked developer data or keys", () => {
 		for (const leaked of ["data/chat.json", "auth.json", ".env", ".env.local"]) {
 			withPayload(({ write, run }) => {
 				write(path.join(STANDALONE, leaked));
@@ -85,7 +77,7 @@ describe("desktop standalone payload", () => {
 		}
 	});
 
-	it("still refuses a missing runtime prompt asset", () => {
+	it("refuses a payload whose prompt assets fell out of the trace", () => {
 		withPayload(({ root, run }) => {
 			fs.rmSync(path.join(root, STANDALONE, PROMPT));
 			const result = run();

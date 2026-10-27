@@ -5,7 +5,9 @@ import { piModels, piEngineForSpec } from "../src/agent/models.ts";
 import { NATIVE_SUBSCRIPTIONS, type NativeSubscriptionSnapshot } from "../src/core/contracts/subscriptions.ts";
 import { refreshSubscriptionModels, nativeSubscriptionModels, subscriptionAbortController, subscriptionRequest } from "../src/agent/subscription-bridge.ts";
 import { subscriptionHistory } from "../src/agent/subscription-stream.ts";
+import { installSubscriptionTransport } from "./helpers/subscription-transport.ts";
 import { runSubagent } from "../src/agent/subagents/pi-run.ts";
+const transport = installSubscriptionTransport((message, callback) => (process.send as unknown as (m: unknown, cb?: (e?: Error) => void) => boolean)(message, callback));
 
 const originalSend = Object.getOwnPropertyDescriptor(process, "send"), originalConnected = Object.getOwnPropertyDescriptor(process, "connected");
 const marker = process.env.LH_DESKTOP_SERVER, secret = process.env.LH_DESKTOP_API_SECRET;
@@ -18,9 +20,8 @@ function snapshot(background = true): NativeSubscriptionSnapshot {
 		models: Object.fromEntries(NATIVE_SUBSCRIPTIONS.map((p) => [p.providerId, piModels().getModels(p.providerId)])),
 	};
 }
-const emit = (value: unknown) => (process.emit as (event: string, value: unknown) => boolean)("message", value);
+const emit = (value: unknown) => transport.emit(value);
 before(async () => {
-	process.env.LH_DESKTOP_SERVER = "1"; process.env.LH_DESKTOP_API_SECRET = "d".repeat(64);
 	process.env.XAI_API_KEY = "fixture-must-never-be-used"; process.env.COPILOT_GITHUB_TOKEN = "fixture-api-route-only";
 	Object.defineProperty(process, "connected", { configurable: true, value: true });
 	Object.defineProperty(process, "send", { configurable: true, value: (message: any, callback?: () => void) => {
@@ -100,8 +101,9 @@ test("background invalidation is provider-specific and preserves foreground cont
 	const stale = snapshot(); stale.statuses.forEach((s) => { s.revision = 0; }); emit({ channel: "lh:subscriptions", op: "changed", snapshot: stale });
 	foreground.release(); background.release(); other.release();
 });
-test("framework IPC alone cannot request subscription credentials or retain a usable catalog", async () => {
-	const previous = sends; delete process.env.LH_DESKTOP_SERVER;
-	await assert.rejects(subscriptionRequest("snapshot"), /desktop app/); assert.equal(sends, previous); assert.deepEqual(nativeSubscriptionModels(), []);
-	process.env.LH_DESKTOP_SERVER = "1";
+test("without a subscription owner, requests reject and no catalog is retained", async () => {
+	const previous = sends; transport.uninstall();
+	try {
+		await assert.rejects(subscriptionRequest("snapshot"), /not running/); assert.equal(sends, previous); assert.deepEqual(nativeSubscriptionModels(), []);
+	} finally { transport.reinstall(); }
 });

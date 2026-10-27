@@ -44,7 +44,7 @@ const Context = createContext({
  * are used; account IDs remain control values, never displayed account labels. */
 export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 	const bridge = useChatGPTBridge();
-	const web = typeof window !== "undefined" && bridge !== window.lh?.chatgpt;
+	const web = typeof window !== "undefined" && bridge !== window.__lhTestBridges?.chatgpt;
 	const [status, setStatus] = useState<ChatGPTStatus>(empty);
 	const [dialog, setDialog] = useState<Dialog | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -129,7 +129,7 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 			try {
 				const next: unknown = await bridge?.status();
 				if (next && mounted.current && request === statusSequence.current) receive.current(next);
-			} catch { if (mounted.current && request === statusSequence.current) setError("The desktop connection is unavailable. Retry when the app is ready."); }
+			} catch { if (mounted.current && request === statusSequence.current) setError("The subscription service is unavailable. Retry in a moment."); }
 		};
 		void refresh();
 		const off = bridge?.onChange(() => void refresh());
@@ -291,7 +291,7 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 					<a href="https://openai.com/policies/privacy-policy/" target="_blank" rel="noreferrer" className="underline underline-offset-2">OpenAI privacy</a>
 					<a href="https://chatgpt.com/settings/usage" target="_blank" rel="noreferrer" className="underline underline-offset-2">Manage usage</a>
 				</div>
-				{!status.available && <p className="mt-3 text-xs text-muted-foreground">ChatGPT sign-in is available only in the desktop app. API-key connections remain available here.</p>}
+				{!status.available && <p className="mt-3 text-xs text-muted-foreground">ChatGPT sign-in is unavailable on this server. API-key connections remain available here.</p>}
 				{status.pending && <p role="status" className="mt-3 text-xs text-muted-foreground">Waiting for browser sign-in…</p>}
 				{context.error && <p role="alert" className="mt-3 text-xs text-red-400">{context.error}</p>}
 				{dialog.kind === "manage" && managed && <div className="mt-4 flex flex-wrap items-center justify-between gap-3" data-testid="chatgpt-account-strip">

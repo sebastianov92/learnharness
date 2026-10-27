@@ -15,7 +15,9 @@ process.env.LH_DATA_DIR = path.join(scratch, "data");
 process.env.LH_AUTH_FILE = path.join(scratch, "auth.json");
 fs.writeFileSync(process.env.LH_AUTH_FILE, "{}");
 const { runPiTurn } = await import("../src/server/pi/ui-stream.ts");
+import { installSubscriptionTransport } from "./helpers/subscription-transport.ts";
 import { newUserMessage, newNextMessage, newThinkingMessage, newAnswerResult, reconstructRequestCause, concludedByDismissalPair, type LhMessage } from "../src/core/native-messages.ts";
+const transport = installSubscriptionTransport((message, callback) => (process.send as unknown as (m: unknown, cb?: (e?: Error) => void) => boolean)(message, callback));
 
 const originalSend = Object.getOwnPropertyDescriptor(process, "send");
 const originalConnected = Object.getOwnPropertyDescriptor(process, "connected");
@@ -26,13 +28,12 @@ let epoch = 1, revision = 1, background = true;
 let cut: "lease" | "payload" | "full" | "afterFetch" | "none" = "none";
 let leases: boolean[] = [], fetches = 0, toolFirst = false;
 const status = () => ({ available: true, pending: false, allowBackgroundUse: background, activeId: "scratch", accounts: [{ id: "scratch", registration: "oaiapp_scratch", email: "dummy@example.invalid", connected: true, planEnabled: true, background: !background }], error: null });
-const ipc = (m: unknown) => (process.emit as (name: string, m: unknown) => boolean)("message", m);
+const ipc = (m: unknown) => transport.emit(m);
 function revoke(full = false) {
  background = false; if (full) epoch++;
  ipc({ channel: "lh:chatgpt", kind: "state", stamp: { epoch, authorityRevision: epoch, revision: ++revision }, status: status(), invalidate: full ? "all" : "background" });
 }
 before(() => {
- process.env.LH_DESKTOP_SERVER = "1"; process.env.LH_DESKTOP_API_SECRET = "d".repeat(64);
  Object.defineProperty(process, "connected", { configurable: true, value: true });
  Object.defineProperty(process, "send", { configurable: true, value: (m: any, callback?: () => void) => {
   if (m.op === "lease") {

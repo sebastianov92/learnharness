@@ -25,23 +25,28 @@ function onChange(hub: Hub, listener: () => void): () => void {
 	return () => { offEvent?.(); offResync?.(); };
 }
 /** Reserve the new tab synchronously in the click gesture. Only a one-use
- * same-origin action URL enters app JS; provider URLs remain in the owner.
- * Electron dev has no tabs: its narrow main-process opener performs this step. */
+ * same-origin action URL enters app JS; provider URLs remain in the owner. */
 async function withBrowser<T>(action: () => Promise<Reply<T>>): Promise<T> {
-	const external = window.lh?.subscriptionTransport === "web" ? window.lh.openSubscriptionBrowser : undefined;
-	const tab = external ? null : window.open("about:blank", "_blank");
-	if (!external && !tab) throw new Error("Allow a sign-in tab to open, then try again.");
-	if (tab) tab.opener = null;
+	const tab = window.open("about:blank", "_blank");
+	if (!tab) throw new Error("Allow a sign-in tab to open, then try again.");
+	tab.opener = null;
 	try {
 		const reply = await action();
 		if (reply.browserAction) {
 			if (!/^\/api\/subscriptions\/browser\?id=[0-9a-f-]{36}$/.test(reply.browserAction)) throw new Error("Invalid sign-in action.");
-			if (external) await external(reply.browserAction);
-			else if (tab && !tab.closed) tab.location.href = reply.browserAction;
+			if (!tab.closed) tab.location.href = reply.browserAction;
 			else throw new Error("The sign-in tab was closed. Cancel and try again.");
-		} else tab?.close();
+		} else tab.close();
 		return reply.value;
-	} catch (error) { tab?.close(); throw error; }
+	} catch (error) { tab.close(); throw error; }
+}
+
+declare global {
+	interface Window {
+		/** TEST SEAM (render tests inject fake control bridges here) — absent
+		 *  in production, where the web bridges below are the only transport. */
+		__lhTestBridges?: { chatgpt?: ChatGPTControlBridge; subscriptions?: NativeSubscriptionControlBridge };
+	}
 }
 export function createWebChatGPTBridge(hub: Hub): ChatGPTControlBridge {
 	const call = async (op: string, fields?: Record<string, unknown>) => (await control<ChatGPTStatus>("chatgpt", op, fields)).value;
@@ -69,9 +74,9 @@ export function createWebNativeBridge(hub: Hub): NativeSubscriptionControlBridge
 }
 export function useChatGPTBridge(): ChatGPTControlBridge | undefined {
 	const hub = useNotifyHub();
-	return useMemo(() => typeof window === "undefined" ? undefined : window.lh?.subscriptionTransport !== "web" && window.lh?.chatgpt ? window.lh.chatgpt : createWebChatGPTBridge(hub), [hub]);
+	return useMemo(() => typeof window === "undefined" ? undefined : window.__lhTestBridges?.chatgpt ?? createWebChatGPTBridge(hub), [hub]);
 }
 export function useNativeSubscriptionBridge(): NativeSubscriptionControlBridge | undefined {
 	const hub = useNotifyHub();
-	return useMemo(() => typeof window === "undefined" ? undefined : window.lh?.subscriptionTransport !== "web" && window.lh?.subscriptions ? window.lh.subscriptions : createWebNativeBridge(hub), [hub]);
+	return useMemo(() => typeof window === "undefined" ? undefined : window.__lhTestBridges?.subscriptions ?? createWebNativeBridge(hub), [hub]);
 }

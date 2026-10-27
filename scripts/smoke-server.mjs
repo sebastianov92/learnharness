@@ -2,19 +2,16 @@
  * smoke-server.mjs — boot the packaged standalone server and prove it serves.
  *
  * The payload gate that pays for itself (2026-10-08): `next build` success
- * and a completed electron-builder run say NOTHING about whether the
- * packaged server actually starts. On its first day this smoke caught two
+ * says NOTHING about whether the packaged server actually starts. On its first day this smoke caught two
  * real defects nothing else saw: (1) a trace-exclude regression that
  * stripped the pi engine packages to bare package.jsons — the server
  * answered 500 on every route with ERR_MODULE_NOT_FOUND; (2) before that,
- * the dev auth.json (BYOK keys) shipping inside the bundle. It runs
- * between build-server.mjs and electron-builder so a broken payload fails
- * in seconds, not after a full packaging pass.
+ * the dev auth.json (BYOK keys) shipping inside the bundle. It runs after
+ * build-server.mjs (npm run build:server; the Docker build stage) so a
+ * broken payload fails in seconds.
  *
  * What it does: spawns .next/standalone/server.js exactly the way the
- * Electron shell does (electron/main.cjs) — with --electron it uses
- * Electron's bundled Node via ELECTRON_RUN_AS_NODE, otherwise host Node —
- * 127.0.0.1 on a kernel-assigned
+ * Docker image does (node server.js) — on 127.0.0.1 on a kernel-assigned
  * free port, NODE_ENV=production, a THROWAWAY LH_DATA_DIR and an EMPTY
  * LH_AUTH_FILE under os.tmpdir() (no real keys or data ever touch it) —
  * polls GET / until 200, then probes the GET-only API surface (graph /
@@ -25,9 +22,8 @@
  * way, same day).
  */
 import { spawn } from "node:child_process";
-import { probeEnv, verifyDemoRuntime } from "./smoke-demo-runtime.mjs";
+import { probeEnv } from "./smoke-lib.mjs";
 import { verifyProviderRuntime } from "./smoke-provider-runtime.mjs";
-import { createRequire } from "node:module";
 import * as fs from "node:fs";
 import * as http from "node:http";
 import * as net from "node:net";
@@ -37,8 +33,6 @@ import * as path from "node:path";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const STANDALONE = path.join(ROOT, ".next", "standalone");
 const SERVER = path.join(STANDALONE, "server.js");
-const ELECTRON_MODE = process.argv.includes("--electron");
-const RUNTIME = ELECTRON_MODE ? createRequire(import.meta.url)("electron") : process.execPath;
 
 const POLL_MS = 500;
 const BOOT_TIMEOUT_MS = 30_000;
@@ -78,11 +72,8 @@ function get(url) {
 }
 
 async function main() {
-	// HTTP boot alone never imports the dynamically loaded demo engine.
-	// Fail before packaging if its standalone dependency graph is incomplete.
-	verifyDemoRuntime(STANDALONE, RUNTIME);
 	// /api/models only reads catalogs; initialize the real lazy SDK offline too.
-	verifyProviderRuntime(STANDALONE, RUNTIME);
+	verifyProviderRuntime(STANDALONE);
 	const port = await freePort();
 	const url = `http://127.0.0.1:${port}`;
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-smoke-"));
@@ -107,12 +98,11 @@ async function main() {
 		for (const line of tail.slice(-40)) if (line.trim()) console.error(`    ${line}`);
 	};
 
-	console.log(`[smoke-server] runtime: ${ELECTRON_MODE ? "Electron bundled Node" : "host Node"}`);
-	const child = spawn(RUNTIME, [SERVER], {
+	console.log(`[smoke-server] runtime: ${process.execPath}`);
+	const child = spawn(process.execPath, [SERVER], {
 		cwd: STANDALONE,
 		env: {
 			...probeEnv(process.env, home),
-			...(ELECTRON_MODE ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
 			NODE_ENV: "production",
 			PORT: String(port),
 			HOSTNAME: "127.0.0.1",

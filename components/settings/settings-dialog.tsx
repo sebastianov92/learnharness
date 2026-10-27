@@ -40,8 +40,7 @@ import {
 	type UserSettings,
 } from "@/src/core";
 import { useAppearance } from "./appearance.tsx";
-import { SettingsSection } from "./controls.tsx";
-import { UpdateSettings } from "./update-settings.tsx";
+import { SettingsRow, SettingsSection } from "./controls.tsx";
 import { AgentSection } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
 import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
@@ -56,6 +55,9 @@ import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
 /** Owner (2026-09-20): hints earn their place — mechanics-explaining
  *  prose is out; only the keyboard note stays (storage location is a
  *  real question users ask). */
+/** Public build metadata (next.config.ts env) — the General section's version row. */
+const APP_VERSION = process.env.LH_VERSION ?? "";
+
 const SECTIONS = [
 	{ id: "keys", label: "Providers" },
 	{ id: "agent", label: "Agent" },
@@ -89,7 +91,6 @@ export function SettingsDialogProvider({
 		setLandOnRow(row ?? null);
 		setShow(true);
 	}, []);
-	useEffect(() => window.lh?.onOpenSettings?.((section) => open(section)), [open]);
 	return (
 		<ChatGPTUIProvider><NativeSubscriptionUIProvider><DialogContext.Provider value={{ open }}>
 			{children}
@@ -360,12 +361,9 @@ export function SettingsDialogBody({
 									title="General"
 									testid="section-general"
 								>
-									<UpdateSettings
-										autoUpdate={record.general?.autoUpdate ?? true}
-										onAutoUpdateChange={(on) =>
-											void write("general", { ...record.general, autoUpdate: on })
-										}
-									/>
+									<SettingsRow label={`Version ${APP_VERSION || "unknown"}`} testid="row-version" hint="LearnHarness server build.">
+										<span />
+									</SettingsRow>
 								</SettingsSection>
 							)}
 							{active === "keys" && (

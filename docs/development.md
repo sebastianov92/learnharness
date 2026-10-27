@@ -2,7 +2,7 @@
 
 The developer README (split out of the storefront README, 2026-10-10). Everything below is for people working ON LearnHarness, not using it.
 
-A standalone learning app (web + Electron desktop): a **teacher agent** (Next.js; the Vercel AI SDK's `UIMessage` protocol end-to-end, LLM engine [pi-ai](docs/pi-engine-swap.md) via OpenRouter), probe→teach lessons with graded quiz/ask interactions, a formal **session plan tree** the teacher authors once (`plan_init`) and whose progress is derived from tagged quiz calls, and a persistent cross-session **knowledge graph** of what the learner knows — the graph is the app's home page.
+A standalone learning app (a web app, deployed as a Docker image — the server edition; the upstream desktop apps were removed in this fork): a **teacher agent** (Next.js; the Vercel AI SDK's `UIMessage` protocol end-to-end, LLM engine [pi-ai](docs/pi-engine-swap.md) via OpenRouter), probe→teach lessons with graded quiz/ask interactions, a formal **session plan tree** the teacher authors once (`plan_init`) and whose progress is derived from tagged quiz calls, and a persistent cross-session **knowledge graph** of what the learner knows — the graph is the app's home page.
 
 Not a chat app with a graph bolted on: sessions are probe→teach lessons, the plan tree is a structured, schema-validated object, sessions accumulate into the graph through the extraction pipeline (propositions + reasoning chains — the stored truth; the canvas renders a derived image), and the teacher reaches back into the graph through read-only prober tools on its own judgment so probing compounds across sessions.
 
@@ -18,14 +18,16 @@ npm install          # once
 npm run dev          # http://localhost:3000
 npm run build        # production build (standalone output)
 npm start            # serve the production build
+npm run build:server # build + curate the standalone payload + the smoke gates (what the Docker build runs)
+
+npm run docker:build # docker build -t learnharness .
+npm run docker:up    # docker compose up -d --build (app + Ollama)
+npm run docker:logs
 
 npm test             # the full suite (node:test via tsx; deterministic, no LLM, no network)
 npm run lint         # eslint — includes the import law (architecture §2)
 npm run typecheck    # tsc --noEmit
 node scripts/smoke-web-subscriptions.mjs # after build: offline Next start/dev + reload gate
-
-npm run desktop:dev    # next dev + Electron shell pointed at it
-npm run desktop:dist   # local signed/notarized macOS arm64 build (LH_NOTARY keychain)
 
 # one-shot data scripts (run from the master tree only — data never crosses trees)
 npx tsx --env-file=.env.local scripts/import-notes.ts <dir>   # bulk-import notes → graph
@@ -33,7 +35,7 @@ npx tsx --env-file=.env.local scripts/backfill-graph.ts       # wipe + re-extrac
 npx tsx --env-file=.env.local scripts/replay-layout.ts        # re-derive layout from the ledgers
 ```
 
-For Windows/Linux packages and the three-OS CI/release flow, see [`desktop-release.md`](desktop-release.md). Native renderer binaries are traced per platform, so release builds run on the target OS, not as cross-builds from macOS.
+For deployment see [Docker](#docker) below. Native renderer binaries (Skia, resvg) are traced per platform by `next build`, so the Linux image builds on Linux — the Dockerfile's build stage — never as a cross-build.
 
 ## Environment (`.env.local`)
 
@@ -41,22 +43,33 @@ Secrets and machine-specific paths only. Model choice and thinking budgets are t
 
 | Variable | Purpose |
 |---|---|
-| `OPENROUTER_API_KEY` | required — all LLM calls go through OpenRouter |
-| `GOOGLE_SEARCH_API_KEY` + `GOOGLE_CSE_ID` | researcher's `web_search` (Google Custom Search) |
+| `<PROVIDER>_API_KEY` (`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, …) | any pi-ai provider key — optional here, the Settings → Providers page stores them in `auth.json` otherwise; env wins |
+| `OLLAMA_HOST` | local models: the Ollama server's address (also settable from Settings → Providers → Local models); `OLLAMA_CONTEXT_LENGTH` mirrors the Ollama server's context length for the context meter |
+| `TAVILY_API_KEY` / `BRAVE_API_KEY` | researcher's `web_search` |
 | `DEEPGRAM_API_KEY` | optional — dictation (STT token minting; audio streams browser→Deepgram, never through the server) |
-| `CHROME_PATH` | optional system Chrome fallback for demo verification; the app's own browser helper is primary (nothing is downloaded) |
+| `LH_DATA_DIR` / `LH_AUTH_FILE` | the data-dir and key-store seams (`config.ts`); the Docker image sets them to `/data` and `/data/auth.json` |
+| `LH_ACCESS_PASSWORD` (+ `LH_ACCESS_USER`) | optional HTTP Basic gate over every request (`proxy.ts`, `src/server/access-gate.ts`) — for an instance reachable beyond localhost |
+| `CHROME_PATH` | the Chrome/Chromium the demo verifier launches (the image ships Debian's chromium and sets this); common install paths are probed when unset |
 
-The packaged desktop app takes keys from `userData/auth.json` (BYOK, mode 0600, read/written directly by the server via `LH_AUTH_FILE`). PDFs render natively with pdfjs/Skia; SVGs use resvg.
+The server takes keys from the file `LH_AUTH_FILE` points at (BYOK, mode 0600, read/written directly by the server). PDFs render natively with pdfjs/Skia; SVGs use resvg.
 
 ### Subscription connections in web/dev
 
-Ordinary `npm run dev` and `npm start` support the existing **ChatGPT, GitHub Copilot and Grok** connections in Settings → Providers. No separate launcher or change to Next's listening/LAN behavior is required. `npm run desktop:dev` uses these same dev-server connections; the packaged desktop app keeps its separate main-process credentials and private IPC transport.
+Ordinary `npm run dev`, `npm start` and the Docker image support the **ChatGPT, GitHub Copilot and Grok** connections in Settings → Providers. The controllers are plain Node modules under `src/subscriptions/` (`.cjs`), composed by `src/server/web-subscriptions.ts` into one process-global owner; the agent layer reaches them only through the injected transport in `src/agent/subscription-runtime.ts`.
 
 Web/dev saves `chatgpt-credentials.json`, `github-copilot-credentials.json` and `xai-credentials.json` **beside the configured API-key `auth.json`**: the project directory by default, or the directory containing `LH_AUTH_FILE`. These are owner-only plaintext files, not files under `data/`, desktop Application Support, or a global Pi profile. Git and standalone-build exclusions cover both the files and atomic-write temporary files. Run only one server process per credential directory: refresh serialization is process-local, not a cross-process lock.
 
-Sign-in opens a new tab in the browser that initiated it; permit that tab if your browser blocks popups. **ChatGPT sign-in must be completed in a browser on the server's machine**, because its callback listener remains `127.0.0.1` on that machine. Copilot/Grok use device codes. In the Electron dev shell, provider pages open in the system browser instead. Once connected, credentials and refresh remain server-owned; other browsers using that server share its connections and background-use consent, just as they share its API keys. Disconnect, storage-failure handling, and provider-specific background consent retain the existing behavior; subscription routes never fall back to API-key billing.
+Sign-in opens a new tab in the browser that initiated it; permit that tab if your browser blocks popups. **ChatGPT sign-in must be completed in a browser on the server's machine**, because its callback listener remains `127.0.0.1` on that machine (on a headless server, prefer API keys or Ollama). Copilot/Grok use device codes and work from anywhere. Once connected, credentials and refresh remain server-owned; other browsers using that server share its connections and background-use consent, just as they share its API keys. Disconnect, storage-failure handling, and provider-specific background consent retain the existing behavior; subscription routes never fall back to API-key billing.
 
-This remains a **trusted developer/shared-server mode**, not multi-user hosting. Subscription controls require same-origin JSON/custom-header requests; browser-opening actions are short-lived, origin-bound and one-use. These checks prevent ordinary cross-origin browser controls, **not user authentication or DNS-rebinding protection**. Do not expose an unprotected dev/server instance to untrusted users or the public Internet; a public deployment needs an independent access/host gate. Remote ChatGPT callback routing, per-user accounts and credential import are not implemented.
+This remains a **single-user, trusted-server mode**, not multi-user hosting. Subscription controls require same-origin JSON/custom-header requests; browser-opening actions are short-lived, origin-bound and one-use. These checks prevent ordinary cross-origin browser controls, **not user authentication or DNS-rebinding protection**. Do not expose an unprotected instance to untrusted users or the public Internet: set `LH_ACCESS_PASSWORD` (HTTP Basic over everything) and terminate TLS in a reverse proxy, or keep the port on a private network. Remote ChatGPT callback routing, per-user accounts and credential import are not implemented.
+
+## Docker
+
+The [`Dockerfile`](../Dockerfile) has three stages: `deps` (`npm ci`), `build` (`next build` with `output: "standalone"`, then the same gates the desktop release used to run — `scripts/build-server.mjs` curates the payload and refuses leaked data/secrets, `scripts/smoke-provider-runtime.mjs` initializes pi-ai's lazy SDKs offline, `scripts/smoke-server.mjs` boots the packaged server and probes its GET routes), and `runtime` (`node:26-bookworm-slim` + Debian's `chromium` for the demo verifier + fonts, running `.next/standalone/server.js` as the `node` user under `tini`). A broken payload fails the image build, never a running container.
+
+Runtime contract: port 3000 on `0.0.0.0`; `/data` is the volume (`LH_DATA_DIR=/data`, `LH_AUTH_FILE=/data/auth.json`); `CHROME_PATH=/usr/bin/chromium`; the optional variables from the table above. The [`docker-compose.yml`](../docker-compose.yml) adds an `ollama` service with its own volume, wires `OLLAMA_HOST` and `OLLAMA_CONTEXT_LENGTH`, and carries commented blocks for an NVIDIA GPU and for reaching an Ollama on the host. CI (`.github/workflows/ci.yml`) builds the image and boots it with the access gate on.
+
+Ollama itself is a dynamic pi-ai provider (`src/agent/ollama.ts`): the model list is fetched from the configured server (`/api/tags` + `/api/show` per model → tools / vision / thinking capabilities and context length) on every `GET /api/models`, projected onto Ollama's OpenAI-compatible `/v1` endpoint, and federated into the catalog exactly like a keyed provider — on `OLLAMA_HOST` instead of a key. The status of the last refresh (host, model count, error) rides on `GET /api/keys` for the Settings page.
 
 ## Architecture
 
@@ -88,7 +101,7 @@ flowchart TB
     end
 
     subgraph ROOM["MACHINE ROOM — host"]
-        HOST["Electron main → standalone Next server ·<br/>config.ts · LH_DATA_DIR · BYOK keys"]
+        HOST["Docker image → standalone Next server ·<br/>config.ts · LH_DATA_DIR=/data · BYOK keys · OLLAMA_HOST"]
     end
 
     LEARNER -->|"text · graded answers"| UI
@@ -151,10 +164,13 @@ src/
                                 arrives as parameters
   store/                        fs adapters implementing the ports: chats · graph
                                 ledgers · jobs (+ render-settings, default-settings)
-electron/                       desktop launcher + security guard (spawns the standalone
-                                server; 1 IPC channel; LH_DATA_DIR + BYOK env)
-scripts/                        build-server.mjs (packaging guards), import-notes,
-                                backfill-graph, replay-layout
+  subscriptions/                plain-Node ChatGPT / Copilot / Grok connection controllers
+                                (.cjs; composed by server/web-subscriptions.ts only)
+  agent/ollama.ts               the Ollama provider (dynamic catalog over the OpenAI-compatible API)
+proxy.ts                        the optional HTTP Basic access gate (LH_ACCESS_PASSWORD)
+Dockerfile · docker-compose.yml the server image and the app + Ollama stack
+scripts/                        build-server.mjs (payload guards), smoke-*.mjs (payload gates),
+                                import-notes, backfill-graph, replay-layout
 data/                           chats/ · graph/ (nodes/chains/sessions/coverage
                                 ledgers + positions/sources/render-settings maps) ·
                                 jobs/ · settings.json — runtime state, git-ignored
@@ -194,6 +210,6 @@ The teaching methodology comes from an Obsidian-based POC (its `knowledge graph 
 
 ## Data
 
-Nothing under `data/` is ever tracked by git. Chats, graph ledgers, jobs, positions, and the settings records are plain files (JSON/JSONL) — inspect them freely; they are the canonical records. The desktop app relocates the whole directory via `LH_DATA_DIR`.
+Nothing under `data/` is ever tracked by git. Chats, graph ledgers, jobs, positions, and the settings records are plain files (JSON/JSONL) — inspect them freely; they are the canonical records. The Docker image relocates the whole directory to the `/data` volume via `LH_DATA_DIR`.
 
 **Schema stamps (2026-10-10):** chat records carry `version` (stamped at the store's write choke point; absence reads as v1 — lazy migration, no mass rewrite), and the graph family (ledgers, sources, render-settings) shares one sidecar `graph/format.json`, created on the family's first write. `positions.json` is deliberately unstamped (rebuildable). A record stamped NEWER than the running build is refused on read — honest refusal for the downgrade scenario: a read-modify-write store never rewrites what it doesn't understand.
